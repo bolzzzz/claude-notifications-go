@@ -53,7 +53,7 @@ Smart notifications for Claude Code with click-to-focus, git branch display, and
 | Question | ❓ | Claude has a question | PreToolUse hook (AskUserQuestion) OR Notification hook |
 | Plan Ready | 📋 | Plan ready for approval | PreToolUse hook (ExitPlanMode) |
 | Session Limit Reached | ⏱️ | Session limit reached | Stop/SubagentStop hooks (state machine detects "Session limit reached" text in last 3 assistant messages) |
-| API Error: 401 | 🔴 | Authentication expired | Stop/SubagentStop hooks (state machine detects "API Error: 401" and "Please run /login" in last 3 assistant messages) |
+| API Error | 🔴 | API error detected (401, 400, 429, 500, 529, etc.) | Stop/SubagentStop hooks (state machine uses `isApiErrorMessage` flag from JSONL; distinguishes 401 auth errors from overloaded/rate-limit/server errors) |
 
 
 ## Installation
@@ -87,6 +87,38 @@ Smart notifications for Claude Code with click-to-focus, git branch display, and
 
 The binary is downloaded once and cached locally. You can re-run `/claude-notifications-go:notifications-settings` anytime to reconfigure.
 
+### Troubleshooting: Ubuntu 24.04 `EXDEV: cross-device link not permitted` during `/plugin install`
+
+If you see an error like:
+
+```
+EXDEV: cross-device link not permitted, rename '.../.claude/plugins/cache/...' -> '/tmp/claude-plugin-temp-...'
+```
+
+This is a **Claude Code installer limitation**: it tries to `rename()` a plugin directory from `~/.claude/...` into `/tmp/...`. On many Linux systems (including Ubuntu 24.04), `/tmp` is a different filesystem (often `tmpfs`), so cross-device `rename()` fails with `EXDEV`.
+
+**Workaround (recommended):** set a temp directory on the same filesystem as your `~/.claude` (usually under `$HOME`), then start Claude Code from that shell session and retry installation.
+
+```bash
+mkdir -p "$HOME/.claude/tmp"
+TMPDIR="$HOME/.claude/tmp" claude
+```
+
+Then run:
+
+```text
+/plugin install claude-notifications-go@claude-notifications-go
+```
+
+**Diagnostics (optional):**
+
+```bash
+df -T "$HOME" /tmp
+mount | grep -E ' on /tmp | on /home '
+```
+
+If `/tmp` shows `tmpfs` (or a different device) while `$HOME` is on `ext4/btrfs/...`, this explains the error.
+
 ### Updating
 
 To update to the latest version:
@@ -109,7 +141,7 @@ Your `config.json` settings will be preserved during the update.
 ### 🧠 Smart Detection
 - **Operations count** File edits, file creates, ran commans + total time
 - **State machine analysis** with temporal locality for accurate status detection
-- **6 notification types**: Task Complete, Review Complete, Question, Plan Ready, Session Limit, API Error
+- **7 notification types**: Task Complete, Review Complete, Question, Plan Ready, Session Limit, API Error (401), API Error (overloaded/rate-limit/server)
 - **PreToolUse integration** for instant alerts when Claude asks questions or creates plans
 - Analyzes conversation context to avoid false positives
 
@@ -470,6 +502,9 @@ go test -run TestStateMachine ./internal/analyzer -v
 - **[Interactive Sound Preview](docs/interactive-sound-preview.md)** - Preview sounds during setup
   - Interactive sound selection
   - Preview before choosing
+
+- **[Troubleshooting](docs/troubleshooting.md)** - Common install/runtime issues
+  - Ubuntu 24.04 `EXDEV` during `/plugin install` (TMPDIR workaround)
 
 - **[Webhook Integration Guide](docs/webhooks/README.md)** - Complete guide for webhook setup
   - **[Slack](docs/webhooks/slack.md)** - Slack integration with color-coded attachments
