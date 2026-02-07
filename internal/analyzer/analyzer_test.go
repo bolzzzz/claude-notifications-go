@@ -60,11 +60,12 @@ func buildAssistantWithTools(tools []string, text string) jsonl.Message {
 
 // buildApiErrorMessage creates a synthetic API error message with isApiErrorMessage=true
 // This matches the real Claude Code JSONL format for API errors
-func buildApiErrorMessage(errorText string) jsonl.Message {
+// errorCode: "unknown" for generic errors, "authentication_failed" for 401
+func buildApiErrorMessage(errorText string, errorCode string) jsonl.Message {
 	return jsonl.Message{
 		Type:              "assistant",
 		IsApiErrorMessage: true,
-		Error:             "unknown",
+		Error:             errorCode,
 		Message: jsonl.MessageContent{
 			Role: "assistant",
 			Content: []jsonl.Content{
@@ -693,10 +694,14 @@ func TestAnalyzeTranscript_SessionLimitReached(t *testing.T) {
 func TestAnalyzeTranscript_APIError(t *testing.T) {
 	cfg := &config.Config{}
 
-	t.Run("api_error_401_via_flag", func(t *testing.T) {
+	t.Run("api_error_401_via_error_field", func(t *testing.T) {
+		// Real format: error="authentication_failed" — primary detection path
 		messages := []jsonl.Message{
 			buildUserMessage("Continue working"),
-			buildApiErrorMessage(`API Error: 401 {"type":"error","error":{"type":"authentication_error","message":"OAuth token has expired"}} · Please run /login`),
+			buildApiErrorMessage(
+				`API Error: 401 {"type":"error","error":{"type":"authentication_error","message":"OAuth token has expired"}} · Please run /login`,
+				"authentication_failed",
+			),
 		}
 		transcriptPath := buildTranscriptFile(t, messages)
 
@@ -710,10 +715,52 @@ func TestAnalyzeTranscript_APIError(t *testing.T) {
 		}
 	})
 
+	t.Run("api_error_401_via_text_fallback", func(t *testing.T) {
+		// Fallback: error="unknown" but text contains 401 + authentication_error
+		messages := []jsonl.Message{
+			buildUserMessage("Continue working"),
+			buildApiErrorMessage(
+				`API Error: 401 {"type":"error","error":{"type":"authentication_error","message":"OAuth token has expired"}} · Please run /login`,
+				"unknown",
+			),
+		}
+		transcriptPath := buildTranscriptFile(t, messages)
+
+		status, err := AnalyzeTranscript(transcriptPath, cfg)
+
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if status != StatusAPIError {
+			t.Errorf("got %v, want StatusAPIError (text fallback)", status)
+		}
+	})
+
+	t.Run("api_error_connection_error", func(t *testing.T) {
+		// Real format from logs: "API Error: Connection error."
+		messages := []jsonl.Message{
+			buildUserMessage("Do something"),
+			buildApiErrorMessage("API Error: Connection error.", "unknown"),
+		}
+		transcriptPath := buildTranscriptFile(t, messages)
+
+		status, err := AnalyzeTranscript(transcriptPath, cfg)
+
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if status != StatusAPIErrorOverloaded {
+			t.Errorf("got %v, want StatusAPIErrorOverloaded", status)
+		}
+	})
+
 	t.Run("api_error_400_content_filter", func(t *testing.T) {
 		messages := []jsonl.Message{
 			buildUserMessage("Do something"),
-			buildApiErrorMessage(`API Error: 400 {"type":"error","error":{"type":"invalid_request_error","message":"Output blocked by content filtering policy"}}`),
+			buildApiErrorMessage(
+				`API Error: 400 {"type":"error","error":{"type":"invalid_request_error","message":"Output blocked by content filtering policy"}}`,
+				"unknown",
+			),
 		}
 		transcriptPath := buildTranscriptFile(t, messages)
 
@@ -730,7 +777,10 @@ func TestAnalyzeTranscript_APIError(t *testing.T) {
 	t.Run("api_error_529_overloaded", func(t *testing.T) {
 		messages := []jsonl.Message{
 			buildUserMessage("Do something"),
-			buildApiErrorMessage(`API Error: 529 {"type":"error","error":{"type":"overloaded_error","message":"Overloaded"}}`),
+			buildApiErrorMessage(
+				`API Error: 529 {"type":"error","error":{"type":"overloaded_error","message":"Overloaded"}}`,
+				"unknown",
+			),
 		}
 		transcriptPath := buildTranscriptFile(t, messages)
 
@@ -747,7 +797,10 @@ func TestAnalyzeTranscript_APIError(t *testing.T) {
 	t.Run("api_error_500_server_error", func(t *testing.T) {
 		messages := []jsonl.Message{
 			buildUserMessage("Do something"),
-			buildApiErrorMessage(`API Error: 500 {"type":"error","error":{"type":"internal_server_error","message":"Internal server error"}}`),
+			buildApiErrorMessage(
+				`API Error: 500 {"type":"error","error":{"type":"internal_server_error","message":"Internal server error"}}`,
+				"unknown",
+			),
 		}
 		transcriptPath := buildTranscriptFile(t, messages)
 
@@ -764,7 +817,10 @@ func TestAnalyzeTranscript_APIError(t *testing.T) {
 	t.Run("api_error_429_rate_limit", func(t *testing.T) {
 		messages := []jsonl.Message{
 			buildUserMessage("Do something"),
-			buildApiErrorMessage(`API Error: 429 {"type":"error","error":{"type":"rate_limit_error","message":"Rate limit exceeded"}}`),
+			buildApiErrorMessage(
+				`API Error: 429 {"type":"error","error":{"type":"rate_limit_error","message":"Rate limit exceeded"}}`,
+				"unknown",
+			),
 		}
 		transcriptPath := buildTranscriptFile(t, messages)
 

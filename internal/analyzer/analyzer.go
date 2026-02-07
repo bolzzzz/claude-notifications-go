@@ -204,10 +204,18 @@ func detectAPIErrors(messages []jsonl.Message) Status {
 		return StatusUnknown
 	}
 
-	// Check the last error message text for 401 (authentication) vs other errors
+	// Check the last error message to determine the type
 	lastError := errorMessages[len(errorMessages)-1]
-	texts := jsonl.ExtractTextFromMessages([]jsonl.Message{lastError})
 
+	// Primary check: use the structured "error" field from JSONL
+	// Real values: "authentication_failed" for 401, "unknown" for others
+	if lastError.Error == "authentication_failed" {
+		return StatusAPIError
+	}
+
+	// Fallback: check text content for 401 indicators
+	// (in case Claude Code changes the error field format)
+	texts := jsonl.ExtractTextFromMessages([]jsonl.Message{lastError})
 	for _, text := range texts {
 		if containsIgnoreCase(text, "401") &&
 			(containsIgnoreCase(text, "authentication_error") ||
@@ -216,7 +224,7 @@ func detectAPIErrors(messages []jsonl.Message) Status {
 		}
 	}
 
-	// Any other API error (400, 429, 500, 529, etc.)
+	// Any other API error (400, 429, 500, 529, connection error, etc.)
 	return StatusAPIErrorOverloaded
 }
 
