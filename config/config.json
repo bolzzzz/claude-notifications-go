@@ -49,6 +49,11 @@
       "title": "🔴 API Error: 401",
       "sound": "${CLAUDE_PLUGIN_ROOT}/sounds/question.mp3",
       "keywords": ["api error", "401", "authentication", "login"]
+    },
+    "api_error_overloaded": {
+      "title": "🔴 API Error",
+      "sound": "${CLAUDE_PLUGIN_ROOT}/sounds/question.mp3",
+      "keywords": ["api error", "overloaded", "rate limit", "timeout", "server error", "529", "500"]
     }
   }
 }

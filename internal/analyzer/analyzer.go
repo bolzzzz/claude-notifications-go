@@ -38,6 +38,7 @@ const (
 	StatusPlanReady           Status = "plan_ready"
 	StatusSessionLimitReached Status = "session_limit_reached"
 	StatusAPIError            Status = "api_error"
+	StatusAPIErrorOverloaded  Status = "api_error_overloaded"
 	StatusUnknown             Status = "unknown"
 )
 
@@ -55,10 +56,9 @@ func AnalyzeTranscript(transcriptPath string, cfg *config.Config) (Status, error
 		return StatusSessionLimitReached, nil
 	}
 
-	// PRIORITY CHECK 2: API authentication error
-	// Check for API 401 errors requiring re-login
-	if detectAPIError(messages) {
-		return StatusAPIError, nil
+	// PRIORITY CHECK 2: API errors (uses isApiErrorMessage flag from JSONL)
+	if apiStatus := detectAPIErrors(messages); apiStatus != StatusUnknown {
+		return apiStatus, nil
 	}
 
 	// Find last user message timestamp
@@ -188,34 +188,36 @@ func detectSessionLimitReached(messages []jsonl.Message) bool {
 	return false
 }
 
-// detectAPIError checks if the last assistant messages contain API 401 authentication error
-func detectAPIError(messages []jsonl.Message) bool {
-	// Check last 3 assistant messages for API error
-	recentMessages := jsonl.GetLastAssistantMessages(messages, 3)
-	if len(recentMessages) == 0 {
-		return false
+// detectAPIErrors checks for API errors using the isApiErrorMessage flag in JSONL.
+// Claude Code sets isApiErrorMessage=true on synthetic assistant messages
+// when the API returns an error (400, 401, 429, 500, 529, etc).
+// Returns the specific error status or StatusUnknown if no API error found.
+func detectAPIErrors(messages []jsonl.Message) Status {
+	// Check if there are any recent API error messages (after last user message)
+	if !jsonl.HasRecentApiError(messages) {
+		return StatusUnknown
 	}
 
-	// Extract text from recent messages
-	texts := jsonl.ExtractTextFromMessages(recentMessages)
+	// Get the last API error messages to determine the type
+	errorMessages := jsonl.GetLastApiErrorMessages(messages, 3)
+	if len(errorMessages) == 0 {
+		return StatusUnknown
+	}
 
-	// Check for both "API Error: 401" AND "Please run /login"
-	hasAPIError := false
-	hasLoginPrompt := false
+	// Check the last error message text for 401 (authentication) vs other errors
+	lastError := errorMessages[len(errorMessages)-1]
+	texts := jsonl.ExtractTextFromMessages([]jsonl.Message{lastError})
 
 	for _, text := range texts {
-		if containsIgnoreCase(text, "API Error: 401") ||
-			containsIgnoreCase(text, "API Error 401") {
-			hasAPIError = true
-		}
-		if containsIgnoreCase(text, "Please run /login") ||
-			containsIgnoreCase(text, "run /login") {
-			hasLoginPrompt = true
+		if containsIgnoreCase(text, "401") &&
+			(containsIgnoreCase(text, "authentication_error") ||
+				containsIgnoreCase(text, "run /login")) {
+			return StatusAPIError
 		}
 	}
 
-	// Both conditions must be present
-	return hasAPIError && hasLoginPrompt
+	// Any other API error (400, 429, 500, 529, etc.)
+	return StatusAPIErrorOverloaded
 }
 
 // containsIgnoreCase checks if string contains substring (case insensitive)

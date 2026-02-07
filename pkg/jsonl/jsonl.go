@@ -10,10 +10,12 @@ import (
 
 // Message represents a Claude Code transcript message
 type Message struct {
-	ParentUUID string         `json:"parentUuid"`
-	Type       string         `json:"type"`
-	Message    MessageContent `json:"message"`
-	Timestamp  string         `json:"timestamp"`
+	ParentUUID        string         `json:"parentUuid"`
+	Type              string         `json:"type"`
+	Message           MessageContent `json:"message"`
+	Timestamp         string         `json:"timestamp"`
+	IsApiErrorMessage bool           `json:"isApiErrorMessage,omitempty"`
+	Error             string         `json:"error,omitempty"`
 }
 
 // MessageContent represents the content of a message
@@ -128,6 +130,41 @@ func Parse(r io.Reader) ([]Message, error) {
 	}
 
 	return messages, nil
+}
+
+// GetLastApiErrorMessages returns the last N messages with isApiErrorMessage=true
+func GetLastApiErrorMessages(messages []Message, count int) []Message {
+	var errorMessages []Message
+	for _, msg := range messages {
+		if msg.IsApiErrorMessage {
+			errorMessages = append(errorMessages, msg)
+		}
+	}
+
+	if len(errorMessages) <= count {
+		return errorMessages
+	}
+	return errorMessages[len(errorMessages)-count:]
+}
+
+// HasRecentApiError checks if there are API error messages after the last user message
+func HasRecentApiError(messages []Message) bool {
+	lastUserTS := GetLastUserTimestamp(messages)
+
+	for i := len(messages) - 1; i >= 0; i-- {
+		msg := messages[i]
+		if msg.IsApiErrorMessage {
+			// If no user timestamp, any API error counts
+			if lastUserTS == "" {
+				return true
+			}
+			// Check if error is after last user message
+			if msg.Timestamp >= lastUserTS {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // GetLastAssistantMessages returns the last N assistant messages

@@ -58,6 +58,23 @@ func buildAssistantWithTools(tools []string, text string) jsonl.Message {
 	}
 }
 
+// buildApiErrorMessage creates a synthetic API error message with isApiErrorMessage=true
+// This matches the real Claude Code JSONL format for API errors
+func buildApiErrorMessage(errorText string) jsonl.Message {
+	return jsonl.Message{
+		Type:              "assistant",
+		IsApiErrorMessage: true,
+		Error:             "unknown",
+		Message: jsonl.MessageContent{
+			Role: "assistant",
+			Content: []jsonl.Content{
+				{Type: "text", Text: errorText},
+			},
+		},
+		Timestamp: "2025-01-01T12:00:01Z",
+	}
+}
+
 // buildTestMessages creates test messages from tool list and text length
 func buildTestMessages(tools []string, textLength int) []jsonl.Message {
 	// Generate text of specific length
@@ -676,10 +693,10 @@ func TestAnalyzeTranscript_SessionLimitReached(t *testing.T) {
 func TestAnalyzeTranscript_APIError(t *testing.T) {
 	cfg := &config.Config{}
 
-	t.Run("api_error_401_with_login_prompt", func(t *testing.T) {
+	t.Run("api_error_401_via_flag", func(t *testing.T) {
 		messages := []jsonl.Message{
 			buildUserMessage("Continue working"),
-			buildAssistantWithTools([]string{}, `API Error: 401 {"type":"error","error":{"type":"authentication_error","message":"OAuth token has expired"}} · Please run /login`),
+			buildApiErrorMessage(`API Error: 401 {"type":"error","error":{"type":"authentication_error","message":"OAuth token has expired"}} · Please run /login`),
 		}
 		transcriptPath := buildTranscriptFile(t, messages)
 
@@ -693,10 +710,10 @@ func TestAnalyzeTranscript_APIError(t *testing.T) {
 		}
 	})
 
-	t.Run("api_error_case_insensitive", func(t *testing.T) {
+	t.Run("api_error_400_content_filter", func(t *testing.T) {
 		messages := []jsonl.Message{
-			buildUserMessage("Continue working"),
-			buildAssistantWithTools([]string{}, "api error 401 - please run /login"),
+			buildUserMessage("Do something"),
+			buildApiErrorMessage(`API Error: 400 {"type":"error","error":{"type":"invalid_request_error","message":"Output blocked by content filtering policy"}}`),
 		}
 		transcriptPath := buildTranscriptFile(t, messages)
 
@@ -705,15 +722,15 @@ func TestAnalyzeTranscript_APIError(t *testing.T) {
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		if status != StatusAPIError {
-			t.Errorf("got %v, want StatusAPIError for case-insensitive match", status)
+		if status != StatusAPIErrorOverloaded {
+			t.Errorf("got %v, want StatusAPIErrorOverloaded", status)
 		}
 	})
 
-	t.Run("api_error_without_login_prompt", func(t *testing.T) {
+	t.Run("api_error_529_overloaded", func(t *testing.T) {
 		messages := []jsonl.Message{
-			buildUserMessage("Hello"),
-			buildAssistantWithTools([]string{}, "API Error: 401 - authentication failed"),
+			buildUserMessage("Do something"),
+			buildApiErrorMessage(`API Error: 529 {"type":"error","error":{"type":"overloaded_error","message":"Overloaded"}}`),
 		}
 		transcriptPath := buildTranscriptFile(t, messages)
 
@@ -722,15 +739,15 @@ func TestAnalyzeTranscript_APIError(t *testing.T) {
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		if status == StatusAPIError {
-			t.Errorf("got StatusAPIError without login prompt, expected different status")
+		if status != StatusAPIErrorOverloaded {
+			t.Errorf("got %v, want StatusAPIErrorOverloaded", status)
 		}
 	})
 
-	t.Run("login_prompt_without_api_error", func(t *testing.T) {
+	t.Run("api_error_500_server_error", func(t *testing.T) {
 		messages := []jsonl.Message{
-			buildUserMessage("Hello"),
-			buildAssistantWithTools([]string{}, "Please run /login to authenticate"),
+			buildUserMessage("Do something"),
+			buildApiErrorMessage(`API Error: 500 {"type":"error","error":{"type":"internal_server_error","message":"Internal server error"}}`),
 		}
 		transcriptPath := buildTranscriptFile(t, messages)
 
@@ -739,8 +756,43 @@ func TestAnalyzeTranscript_APIError(t *testing.T) {
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		if status == StatusAPIError {
-			t.Errorf("got StatusAPIError without API error text, expected different status")
+		if status != StatusAPIErrorOverloaded {
+			t.Errorf("got %v, want StatusAPIErrorOverloaded", status)
+		}
+	})
+
+	t.Run("api_error_429_rate_limit", func(t *testing.T) {
+		messages := []jsonl.Message{
+			buildUserMessage("Do something"),
+			buildApiErrorMessage(`API Error: 429 {"type":"error","error":{"type":"rate_limit_error","message":"Rate limit exceeded"}}`),
+		}
+		transcriptPath := buildTranscriptFile(t, messages)
+
+		status, err := AnalyzeTranscript(transcriptPath, cfg)
+
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if status != StatusAPIErrorOverloaded {
+			t.Errorf("got %v, want StatusAPIErrorOverloaded", status)
+		}
+	})
+
+	t.Run("no_flag_no_detection", func(t *testing.T) {
+		// Regular assistant message talking about API errors should NOT trigger
+		messages := []jsonl.Message{
+			buildUserMessage("Hello"),
+			buildAssistantWithTools([]string{"Write"}, "I fixed the API Error 500 handling in your code"),
+		}
+		transcriptPath := buildTranscriptFile(t, messages)
+
+		status, err := AnalyzeTranscript(transcriptPath, cfg)
+
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if status == StatusAPIError || status == StatusAPIErrorOverloaded {
+			t.Errorf("got %v, should not detect API error without isApiErrorMessage flag", status)
 		}
 	})
 
@@ -756,8 +808,8 @@ func TestAnalyzeTranscript_APIError(t *testing.T) {
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		if status == StatusAPIError {
-			t.Errorf("got StatusAPIError, expected different status")
+		if status == StatusAPIError || status == StatusAPIErrorOverloaded {
+			t.Errorf("got %v, expected different status", status)
 		}
 	})
 }
