@@ -1041,6 +1041,109 @@ func TestGenerateFromTranscript_APIError(t *testing.T) {
 	}
 }
 
+func TestGenerateAPIErrorOverloadedSummary(t *testing.T) {
+	cfg := config.DefaultConfig()
+
+	t.Run("extracts_error_text", func(t *testing.T) {
+		messages := []jsonl.Message{
+			{
+				Type:              "assistant",
+				IsApiErrorMessage: true,
+				Error:             "unknown",
+				Timestamp:         time.Now().Format(time.RFC3339),
+				Message: jsonl.MessageContent{
+					Content: []jsonl.Content{
+						{Type: "text", Text: `API Error: 529 {"type":"error","error":{"type":"overloaded_error","message":"Overloaded"}}`},
+					},
+				},
+			},
+		}
+
+		result := generateAPIErrorOverloadedSummary(messages, cfg)
+		if !strings.Contains(result, "529") {
+			t.Errorf("should contain error code, got: %s", result)
+		}
+		if !strings.Contains(result, "overloaded") {
+			t.Errorf("should contain error type, got: %s", result)
+		}
+	})
+
+	t.Run("connection_error", func(t *testing.T) {
+		messages := []jsonl.Message{
+			{
+				Type:              "assistant",
+				IsApiErrorMessage: true,
+				Error:             "unknown",
+				Timestamp:         time.Now().Format(time.RFC3339),
+				Message: jsonl.MessageContent{
+					Content: []jsonl.Content{
+						{Type: "text", Text: "API Error: Connection error."},
+					},
+				},
+			},
+		}
+
+		result := generateAPIErrorOverloadedSummary(messages, cfg)
+		if !strings.Contains(result, "Connection error") {
+			t.Errorf("should contain 'Connection error', got: %s", result)
+		}
+	})
+
+	t.Run("no_api_error_messages", func(t *testing.T) {
+		messages := []jsonl.Message{
+			{
+				Type:      "assistant",
+				Timestamp: time.Now().Format(time.RFC3339),
+				Message: jsonl.MessageContent{
+					Content: []jsonl.Content{
+						{Type: "text", Text: "Normal message"},
+					},
+				},
+			},
+		}
+
+		result := generateAPIErrorOverloadedSummary(messages, cfg)
+		if result != "API error occurred" {
+			t.Errorf("should return fallback, got: %s", result)
+		}
+	})
+
+	t.Run("empty_messages", func(t *testing.T) {
+		result := generateAPIErrorOverloadedSummary([]jsonl.Message{}, cfg)
+		if result != "API error occurred" {
+			t.Errorf("should return fallback for empty, got: %s", result)
+		}
+	})
+}
+
+func TestGenerateFromTranscript_APIErrorOverloaded(t *testing.T) {
+	tmpDir := t.TempDir()
+	transcriptPath := tmpDir + "/api_error_overloaded.jsonl"
+
+	messages := []jsonl.Message{
+		{
+			Type:              "assistant",
+			IsApiErrorMessage: true,
+			Error:             "unknown",
+			Timestamp:         time.Now().Format(time.RFC3339),
+			Message: jsonl.MessageContent{
+				Content: []jsonl.Content{
+					{Type: "text", Text: `API Error: 500 {"type":"error","error":{"type":"internal_server_error","message":"Internal server error"}}`},
+				},
+			},
+		},
+	}
+
+	writeTranscript(t, transcriptPath, messages)
+
+	cfg := config.DefaultConfig()
+	result := GenerateFromTranscript(transcriptPath, analyzer.StatusAPIErrorOverloaded, cfg)
+
+	if !strings.Contains(result, "500") {
+		t.Errorf("API Error Overloaded summary should contain error code, got: %s", result)
+	}
+}
+
 func TestCalculateDuration(t *testing.T) {
 	now := time.Now()
 	userTime := now.Add(-120 * time.Second)

@@ -749,6 +749,139 @@ func TestMessageContent_UnmarshalJSON_ArrayTextContent(t *testing.T) {
 	assert.Equal(t, "[Request interrupted by user for tool use]", msg.Message.Content[0].Text)
 }
 
+// === Tests for GetLastApiErrorMessages ===
+
+func TestGetLastApiErrorMessages(t *testing.T) {
+	messages := []Message{
+		{Type: "assistant", IsApiErrorMessage: false},
+		{Type: "assistant", IsApiErrorMessage: true, Error: "unknown",
+			Message: MessageContent{Content: []Content{{Type: "text", Text: "API Error: Connection error."}}}},
+		{Type: "assistant", IsApiErrorMessage: false},
+		{Type: "assistant", IsApiErrorMessage: true, Error: "unknown",
+			Message: MessageContent{Content: []Content{{Type: "text", Text: "API Error: 529"}}}},
+		{Type: "assistant", IsApiErrorMessage: true, Error: "authentication_failed",
+			Message: MessageContent{Content: []Content{{Type: "text", Text: "API Error: 401"}}}},
+	}
+
+	t.Run("get_last_1", func(t *testing.T) {
+		result := GetLastApiErrorMessages(messages, 1)
+		assert.Len(t, result, 1)
+		assert.Equal(t, "authentication_failed", result[0].Error)
+	})
+
+	t.Run("get_last_2", func(t *testing.T) {
+		result := GetLastApiErrorMessages(messages, 2)
+		assert.Len(t, result, 2)
+		assert.Equal(t, "unknown", result[0].Error)
+		assert.Equal(t, "authentication_failed", result[1].Error)
+	})
+
+	t.Run("get_all", func(t *testing.T) {
+		result := GetLastApiErrorMessages(messages, 10)
+		assert.Len(t, result, 3)
+	})
+
+	t.Run("no_errors", func(t *testing.T) {
+		noErrors := []Message{
+			{Type: "assistant", IsApiErrorMessage: false},
+			{Type: "user"},
+		}
+		result := GetLastApiErrorMessages(noErrors, 5)
+		assert.Len(t, result, 0)
+	})
+
+	t.Run("empty_messages", func(t *testing.T) {
+		result := GetLastApiErrorMessages([]Message{}, 5)
+		assert.Len(t, result, 0)
+	})
+}
+
+// === Tests for HasRecentApiError ===
+
+func TestHasRecentApiError(t *testing.T) {
+	t.Run("error_after_user_message", func(t *testing.T) {
+		messages := []Message{
+			{Type: "user", Timestamp: "2025-01-01T10:00:00Z", Message: MessageContent{ContentString: "hello"}},
+			{Type: "assistant", Timestamp: "2025-01-01T10:00:05Z", IsApiErrorMessage: true, Error: "unknown"},
+		}
+		assert.True(t, HasRecentApiError(messages))
+	})
+
+	t.Run("error_before_user_message", func(t *testing.T) {
+		messages := []Message{
+			{Type: "assistant", Timestamp: "2025-01-01T10:00:00Z", IsApiErrorMessage: true, Error: "unknown"},
+			{Type: "user", Timestamp: "2025-01-01T10:00:05Z", Message: MessageContent{ContentString: "hello"}},
+		}
+		assert.False(t, HasRecentApiError(messages))
+	})
+
+	t.Run("no_user_message", func(t *testing.T) {
+		messages := []Message{
+			{Type: "assistant", Timestamp: "2025-01-01T10:00:00Z", IsApiErrorMessage: true, Error: "unknown"},
+		}
+		assert.True(t, HasRecentApiError(messages))
+	})
+
+	t.Run("no_api_errors", func(t *testing.T) {
+		messages := []Message{
+			{Type: "user", Timestamp: "2025-01-01T10:00:00Z", Message: MessageContent{ContentString: "hello"}},
+			{Type: "assistant", Timestamp: "2025-01-01T10:00:05Z", IsApiErrorMessage: false},
+		}
+		assert.False(t, HasRecentApiError(messages))
+	})
+
+	t.Run("empty_messages", func(t *testing.T) {
+		assert.False(t, HasRecentApiError([]Message{}))
+	})
+
+	t.Run("same_timestamp_as_user", func(t *testing.T) {
+		messages := []Message{
+			{Type: "user", Timestamp: "2025-01-01T10:00:00Z", Message: MessageContent{ContentString: "hello"}},
+			{Type: "assistant", Timestamp: "2025-01-01T10:00:00Z", IsApiErrorMessage: true, Error: "unknown"},
+		}
+		assert.True(t, HasRecentApiError(messages))
+	})
+}
+
+// === Tests for isApiErrorMessage JSON parsing ===
+
+func TestMessage_IsApiErrorMessage_Parse(t *testing.T) {
+	t.Run("parse_true", func(t *testing.T) {
+		jsonStr := `{"type":"assistant","isApiErrorMessage":true,"error":"unknown","message":{"role":"assistant","content":[{"type":"text","text":"API Error: 500"}]},"timestamp":"2025-01-01T10:00:00Z"}`
+		var msg Message
+		err := json.Unmarshal([]byte(jsonStr), &msg)
+		assert.NoError(t, err)
+		assert.True(t, msg.IsApiErrorMessage)
+		assert.Equal(t, "unknown", msg.Error)
+	})
+
+	t.Run("parse_false", func(t *testing.T) {
+		jsonStr := `{"type":"assistant","isApiErrorMessage":false,"message":{"role":"assistant","content":[{"type":"text","text":"Hello"}]},"timestamp":"2025-01-01T10:00:00Z"}`
+		var msg Message
+		err := json.Unmarshal([]byte(jsonStr), &msg)
+		assert.NoError(t, err)
+		assert.False(t, msg.IsApiErrorMessage)
+		assert.Equal(t, "", msg.Error)
+	})
+
+	t.Run("parse_absent", func(t *testing.T) {
+		jsonStr := `{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Hello"}]},"timestamp":"2025-01-01T10:00:00Z"}`
+		var msg Message
+		err := json.Unmarshal([]byte(jsonStr), &msg)
+		assert.NoError(t, err)
+		assert.False(t, msg.IsApiErrorMessage)
+	})
+
+	t.Run("parse_authentication_failed", func(t *testing.T) {
+		jsonStr := `{"type":"assistant","isApiErrorMessage":true,"error":"authentication_failed","message":{"role":"assistant","content":[{"type":"text","text":"API Error: 401"}]},"timestamp":"2025-01-01T10:00:00Z"}`
+		var msg Message
+		err := json.Unmarshal([]byte(jsonStr), &msg)
+		assert.NoError(t, err)
+		assert.True(t, msg.IsApiErrorMessage)
+		assert.Equal(t, "authentication_failed", msg.Error)
+	})
+}
+
 // === Tests for GetLastAssistantTimestamp ===
 
 func TestGetLastAssistantTimestamp_Found(t *testing.T) {
