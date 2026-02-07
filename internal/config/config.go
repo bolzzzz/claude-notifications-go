@@ -148,6 +148,10 @@ func DefaultConfig() *Config {
 				Title: "🔴 API Error: 401",
 				Sound: filepath.Join(pluginRoot, "sounds", "question.mp3"), // reuse question sound
 			},
+			"api_error_overloaded": {
+				Title: "🔴 API Error",
+				Sound: filepath.Join(pluginRoot, "sounds", "question.mp3"), // reuse question sound
+			},
 		},
 	}
 }

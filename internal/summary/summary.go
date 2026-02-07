@@ -82,6 +82,8 @@ func GenerateFromTranscript(transcriptPath string, status analyzer.Status, cfg *
 		return generateSessionLimitSummary(messages, cfg)
 	case analyzer.StatusAPIError:
 		return generateAPIErrorSummary(messages, cfg)
+	case analyzer.StatusAPIErrorOverloaded:
+		return generateAPIErrorOverloadedSummary(messages, cfg)
 	default:
 		return generateTaskSummary(messages, cfg)
 	}
@@ -282,10 +284,24 @@ func generateSessionLimitSummary(messages []jsonl.Message, cfg *config.Config) s
 	return "Session limit reached. Please start a new conversation."
 }
 
-// generateAPIErrorSummary generates summary for api_error status
+// generateAPIErrorSummary generates summary for api_error (401 authentication) status
 func generateAPIErrorSummary(messages []jsonl.Message, cfg *config.Config) string {
-	// Simple message for API authentication error
 	return "Please run /login"
+}
+
+// generateAPIErrorOverloadedSummary generates summary for api_error_overloaded status
+// Extracts the actual error text from the API error message
+func generateAPIErrorOverloadedSummary(messages []jsonl.Message, cfg *config.Config) string {
+	// Find the last API error message and extract its text
+	errorMessages := jsonl.GetLastApiErrorMessages(messages, 1)
+	if len(errorMessages) > 0 {
+		texts := jsonl.ExtractTextFromMessages(errorMessages)
+		if len(texts) > 0 {
+			cleaned := CleanMarkdown(texts[0])
+			return truncateText(cleaned, 150)
+		}
+	}
+	return "API error occurred"
 }
 
 // extractAskUserQuestion extracts the last AskUserQuestion with recency check
