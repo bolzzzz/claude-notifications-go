@@ -296,9 +296,11 @@ func generateAPIErrorOverloadedSummary(messages []jsonl.Message, cfg *config.Con
 	errorMessages := jsonl.GetLastApiErrorMessages(messages, 1)
 	if len(errorMessages) > 0 {
 		texts := jsonl.ExtractTextFromMessages(errorMessages)
-		if len(texts) > 0 {
-			cleaned := CleanMarkdown(texts[0])
-			return truncateText(cleaned, 150)
+		for _, text := range texts {
+			cleaned := strings.TrimSpace(CleanMarkdown(text))
+			if cleaned != "" {
+				return truncateText(cleaned, 150)
+			}
 		}
 	}
 	return "API error occurred"

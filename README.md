@@ -91,7 +91,7 @@ The binary is downloaded once and cached locally. You can re-run `/claude-notifi
 
 If you see an error like:
 
-```
+```text
 EXDEV: cross-device link not permitted, rename '.../.claude/plugins/cache/...' -> '/tmp/claude-plugin-temp-...'
 ```
 
