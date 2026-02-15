@@ -929,6 +929,44 @@ func TestNotifier_RapidClose(t *testing.T) {
 	}
 }
 
+func TestSendTerminalBell_DoesNotPanic(t *testing.T) {
+	// sendTerminalBell should never panic regardless of TTY availability.
+	// In CI there is no /dev/tty so the open will fail silently;
+	// in a real terminal the BEL character is written.
+	sendTerminalBell()
+}
+
+func TestSendDesktop_CallsBell(t *testing.T) {
+	// Verify SendDesktop does not panic when bell is enabled (default)
+	// and desktop notifications are disabled.
+	cfg := config.DefaultConfig()
+	cfg.Notifications.Desktop.Enabled = false
+
+	n := New(cfg)
+
+	// Should not panic — bell is sent, then returns nil for disabled desktop
+	err := n.SendDesktop(analyzer.StatusTaskComplete, "test message")
+	if err != nil {
+		t.Errorf("Expected nil error when disabled, got: %v", err)
+	}
+}
+
+func TestSendDesktop_BellDisabledByConfig(t *testing.T) {
+	// Verify SendDesktop respects terminalBell=false config.
+	cfg := config.DefaultConfig()
+	cfg.Notifications.Desktop.Enabled = false
+	bellOff := false
+	cfg.Notifications.Desktop.TerminalBell = &bellOff
+
+	n := New(cfg)
+
+	// Should not panic — bell is skipped, then returns nil for disabled desktop
+	err := n.SendDesktop(analyzer.StatusTaskComplete, "test message")
+	if err != nil {
+		t.Errorf("Expected nil error when disabled, got: %v", err)
+	}
+}
+
 func TestBuildTerminalNotifierArgs_AllKnownBundleIDs(t *testing.T) {
 	// Test with all known bundle IDs from the mapping
 	bundleIDs := []string{

@@ -519,6 +519,22 @@ func TestDefaultConfig_ClickToFocus(t *testing.T) {
 	assert.Empty(t, cfg.Notifications.Desktop.TerminalBundleID, "TerminalBundleID should be empty for auto-detect")
 }
 
+func TestIsTerminalBellEnabled(t *testing.T) {
+	// Default (nil) should be true
+	cfg := DefaultConfig()
+	assert.True(t, cfg.IsTerminalBellEnabled(), "TerminalBell should be true by default (nil)")
+
+	// Explicitly true
+	bellOn := true
+	cfg.Notifications.Desktop.TerminalBell = &bellOn
+	assert.True(t, cfg.IsTerminalBellEnabled(), "TerminalBell should be true when set to true")
+
+	// Explicitly false
+	bellOff := false
+	cfg.Notifications.Desktop.TerminalBell = &bellOff
+	assert.False(t, cfg.IsTerminalBellEnabled(), "TerminalBell should be false when set to false")
+}
+
 func TestLoadConfig_ClickToFocus(t *testing.T) {
 	tmpDir := t.TempDir()
 	configPath := filepath.Join(tmpDir, "config.json")

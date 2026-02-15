@@ -30,6 +30,7 @@ type NotificationsConfig struct {
 type DesktopConfig struct {
 	Enabled          bool    `json:"enabled"`
 	Sound            bool    `json:"sound"`
+	TerminalBell     *bool   `json:"terminalBell"`     // Send BEL to /dev/tty for terminal tab indicators (default: true)
 	Volume           float64 `json:"volume"`           // Volume level 0.0-1.0, default 1.0 (full volume)
 	AudioDevice      string  `json:"audioDevice"`      // Audio output device name (empty = system default)
 	AppIcon          string  `json:"appIcon"`          // Path to app icon
@@ -332,6 +333,14 @@ func (c *Config) IsStatusEnabled(status string) bool {
 		return true // nil means enabled (backward compatibility)
 	}
 	return *info.Enabled
+}
+
+// IsTerminalBellEnabled returns true if terminal bell (BEL) should be sent (default: true)
+func (c *Config) IsTerminalBellEnabled() bool {
+	if c.Notifications.Desktop.TerminalBell == nil {
+		return true // Default: enabled
+	}
+	return *c.Notifications.Desktop.TerminalBell
 }
 
 // IsStatusDesktopEnabled returns true if desktop notifications for this status are enabled

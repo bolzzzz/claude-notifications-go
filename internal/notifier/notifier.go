@@ -2,6 +2,7 @@ package notifier
 
 import (
 	"fmt"
+	"os"
 	"os/exec"
 	"strings"
 	"sync"
@@ -39,6 +40,11 @@ func New(cfg *config.Config) *Notifier {
 // On macOS with clickToFocus enabled, uses terminal-notifier for click-to-focus support
 // On Linux with clickToFocus enabled, uses background daemon for click-to-focus support
 func (n *Notifier) SendDesktop(status analyzer.Status, message string) error {
+	// Send terminal bell for terminal tab indicators (e.g. Ghostty, tmux)
+	if n.cfg.IsTerminalBellEnabled() {
+		sendTerminalBell()
+	}
+
 	if !n.cfg.IsDesktopEnabled() {
 		logging.Debug("Desktop notifications disabled, skipping")
 		return nil
@@ -265,6 +271,18 @@ func (n *Notifier) Close() error {
 	n.mu.Unlock()
 
 	return nil
+}
+
+// sendTerminalBell writes a BEL character to /dev/tty to trigger terminal
+// tab indicators (e.g. Ghostty tab highlight, tmux window bell flag).
+func sendTerminalBell() {
+	f, err := os.OpenFile("/dev/tty", os.O_WRONLY, 0)
+	if err != nil {
+		logging.Debug("Could not open /dev/tty for bell: %v", err)
+		return
+	}
+	defer f.Close()
+	_, _ = f.Write([]byte("\a"))
 }
 
 // extractSessionInfo extracts session name and git branch from message
