@@ -535,6 +535,44 @@ func TestIsTerminalBellEnabled(t *testing.T) {
 	assert.False(t, cfg.IsTerminalBellEnabled(), "TerminalBell should be false when set to false")
 }
 
+func TestLoadConfig_TerminalBell(t *testing.T) {
+	tests := []struct {
+		name     string
+		json     string
+		expected bool
+	}{
+		{
+			name:     "terminalBell explicitly true",
+			json:     `{"notifications": {"desktop": {"enabled": true, "terminalBell": true}}}`,
+			expected: true,
+		},
+		{
+			name:     "terminalBell explicitly false",
+			json:     `{"notifications": {"desktop": {"enabled": true, "terminalBell": false}}}`,
+			expected: false,
+		},
+		{
+			name:     "terminalBell omitted defaults to true",
+			json:     `{"notifications": {"desktop": {"enabled": true}}}`,
+			expected: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tmpDir := t.TempDir()
+			configPath := filepath.Join(tmpDir, "config.json")
+
+			err := os.WriteFile(configPath, []byte(tt.json), 0644)
+			require.NoError(t, err)
+
+			cfg, err := Load(configPath)
+			require.NoError(t, err)
+			assert.Equal(t, tt.expected, cfg.IsTerminalBellEnabled())
+		})
+	}
+}
+
 func TestLoadConfig_ClickToFocus(t *testing.T) {
 	tmpDir := t.TempDir()
 	configPath := filepath.Join(tmpDir, "config.json")

@@ -936,31 +936,47 @@ func TestSendTerminalBell_DoesNotPanic(t *testing.T) {
 	sendTerminalBell()
 }
 
-func TestSendDesktop_CallsBell(t *testing.T) {
+func TestSendDesktop_BellEnabledByDefault_DoesNotPanic(t *testing.T) {
 	// Verify SendDesktop does not panic when bell is enabled (default)
-	// and desktop notifications are disabled.
+	// and desktop notifications are enabled.
 	cfg := config.DefaultConfig()
-	cfg.Notifications.Desktop.Enabled = false
+	cfg.Notifications.Desktop.Enabled = true
+	cfg.Notifications.Desktop.Sound = false
 
 	n := New(cfg)
 
-	// Should not panic — bell is sent, then returns nil for disabled desktop
+	// Should not panic — bell is sent before notification
 	err := n.SendDesktop(analyzer.StatusTaskComplete, "test message")
-	if err != nil {
-		t.Errorf("Expected nil error when disabled, got: %v", err)
-	}
+	// Error acceptable in CI where notifications may not work
+	_ = err
 }
 
 func TestSendDesktop_BellDisabledByConfig(t *testing.T) {
 	// Verify SendDesktop respects terminalBell=false config.
 	cfg := config.DefaultConfig()
-	cfg.Notifications.Desktop.Enabled = false
+	cfg.Notifications.Desktop.Enabled = true
+	cfg.Notifications.Desktop.Sound = false
 	bellOff := false
 	cfg.Notifications.Desktop.TerminalBell = &bellOff
 
 	n := New(cfg)
 
-	// Should not panic — bell is skipped, then returns nil for disabled desktop
+	// Should not panic — bell is skipped, notification still sent
+	err := n.SendDesktop(analyzer.StatusTaskComplete, "test message")
+	// Error acceptable in CI
+	_ = err
+}
+
+func TestSendDesktop_BellWorksWhenDesktopDisabled(t *testing.T) {
+	// Bell is independent of desktop (GUI) notifications.
+	// It triggers terminal tab indicators (Ghostty, tmux) and should work
+	// even when desktop.enabled=false (e.g. headless SSH sessions).
+	cfg := config.DefaultConfig()
+	cfg.Notifications.Desktop.Enabled = false
+
+	n := New(cfg)
+
+	// Should not panic — bell is sent, then early return for disabled desktop
 	err := n.SendDesktop(analyzer.StatusTaskComplete, "test message")
 	if err != nil {
 		t.Errorf("Expected nil error when disabled, got: %v", err)
