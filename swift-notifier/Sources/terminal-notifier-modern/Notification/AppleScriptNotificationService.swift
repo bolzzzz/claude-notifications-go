@@ -9,9 +9,13 @@ final class OsascriptNotificationService: NotificationSending {
         let escapedTitle = config.title
             .replacingOccurrences(of: "\\", with: "\\\\")
             .replacingOccurrences(of: "\"", with: "\\\"")
+            .replacingOccurrences(of: "\n", with: " ")
+            .replacingOccurrences(of: "\r", with: "")
         let escapedMessage = config.message
             .replacingOccurrences(of: "\\", with: "\\\\")
             .replacingOccurrences(of: "\"", with: "\\\"")
+            .replacingOccurrences(of: "\n", with: " ")
+            .replacingOccurrences(of: "\r", with: "")
 
         var source = "display notification \"\(escapedMessage)\" with title \"\(escapedTitle)\""
 
@@ -19,6 +23,8 @@ final class OsascriptNotificationService: NotificationSending {
             let escapedSubtitle = subtitle
                 .replacingOccurrences(of: "\\", with: "\\\\")
                 .replacingOccurrences(of: "\"", with: "\\\"")
+                .replacingOccurrences(of: "\n", with: " ")
+                .replacingOccurrences(of: "\r", with: "")
             source += " subtitle \"\(escapedSubtitle)\""
         }
 

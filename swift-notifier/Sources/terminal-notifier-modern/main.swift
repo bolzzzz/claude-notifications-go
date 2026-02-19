@@ -108,5 +108,7 @@ func runCallbackMode() {
         NSApplication.shared.terminate(nil)
     }
 
-    app.run()
+    withExtendedLifetime(appDelegate) {
+        app.run()
+    }
 }

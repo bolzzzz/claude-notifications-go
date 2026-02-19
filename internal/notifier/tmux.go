@@ -63,12 +63,12 @@ func buildTmuxNotifierArgs(title, message, paneTarget, bundleID string) []string
 	var tmuxCmd string
 	if socketPath != "" {
 		tmuxCmd = fmt.Sprintf(
-			"%s -S %s select-window -t '%s' \\; select-pane -t '%s'",
+			"'%s' -S '%s' select-window -t '%s' \\; select-pane -t '%s'",
 			tmuxPath, socketPath, paneTarget, paneTarget,
 		)
 	} else {
 		tmuxCmd = fmt.Sprintf(
-			"%s select-window -t '%s' \\; select-pane -t '%s'",
+			"'%s' select-window -t '%s' \\; select-pane -t '%s'",
 			tmuxPath, paneTarget, paneTarget,
 		)
 	}

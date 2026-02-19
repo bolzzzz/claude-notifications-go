@@ -83,8 +83,8 @@ The CI workflow:
 ### Local build (optional)
 
 ```bash
-make build-notifier              # ad-hoc or local cert signing
-make build-notifier -- --ci      # Developer ID + notarization (needs env vars)
+make build-notifier                                      # ad-hoc or local cert signing
+cd swift-notifier && bash scripts/build-app.sh --ci      # Developer ID + notarization (needs env vars)
 ```
 
 ## 6. Update release description

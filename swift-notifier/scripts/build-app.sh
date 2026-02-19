@@ -100,17 +100,17 @@ else
 fi
 
 # Code signing
-CODESIGN_FLAGS="--force --timestamp"
+CODESIGN_FLAGS=(--force --timestamp)
 
 if [ "$CI_MODE" = true ]; then
     # CI: use Developer ID Application for distribution
     SIGNING_IDENTITY="Developer ID Application"
-    CODESIGN_FLAGS="${CODESIGN_FLAGS} --options runtime"
+    CODESIGN_FLAGS+=(--options runtime)
     if [ -f "$ENTITLEMENTS" ]; then
-        CODESIGN_FLAGS="${CODESIGN_FLAGS} --entitlements ${ENTITLEMENTS}"
+        CODESIGN_FLAGS+=(--entitlements "$ENTITLEMENTS")
     fi
     echo "Code signing with: ${SIGNING_IDENTITY} (hardened runtime)"
-    codesign ${CODESIGN_FLAGS} --sign "${SIGNING_IDENTITY}" "${APP_BUNDLE}"
+    codesign "${CODESIGN_FLAGS[@]}" --sign "${SIGNING_IDENTITY}" "${APP_BUNDLE}"
     echo "Code signing successful"
 
     # Verify signature
@@ -124,9 +124,9 @@ else
     DEV_ID=$(security find-identity -v -p codesigning 2>/dev/null | grep "Developer ID Application" | head -1 | sed 's/.*"\(.*\)"/\1/' || true)
     if [ -n "$DEV_ID" ]; then
         SIGNING_IDENTITY="$DEV_ID"
-        CODESIGN_FLAGS="${CODESIGN_FLAGS} --options runtime"
+        CODESIGN_FLAGS+=(--options runtime)
         if [ -f "$ENTITLEMENTS" ]; then
-            CODESIGN_FLAGS="${CODESIGN_FLAGS} --entitlements ${ENTITLEMENTS}"
+            CODESIGN_FLAGS+=(--entitlements "$ENTITLEMENTS")
         fi
         echo "Code signing with: ${SIGNING_IDENTITY} (hardened runtime)"
     fi
@@ -141,7 +141,7 @@ else
     fi
 
     if [ -n "$SIGNING_IDENTITY" ]; then
-        codesign ${CODESIGN_FLAGS} --sign "${SIGNING_IDENTITY}" "${APP_BUNDLE}" 2>/dev/null || {
+        codesign "${CODESIGN_FLAGS[@]}" --sign "${SIGNING_IDENTITY}" "${APP_BUNDLE}" 2>/dev/null || {
             echo "Developer signing failed, falling back to ad-hoc..."
             codesign --force --deep --sign - "$APP_BUNDLE" 2>/dev/null || {
                 echo "Warning: code signing failed (notifications may require manual permission)"
