@@ -259,7 +259,7 @@ func buildAppleScriptFocusScript(bundleID, folderName string) string {
 	safeBundleID := sanitizeForAppleScript(bundleID)
 	safeFolder := sanitizeForAppleScript(folderName)
 	return fmt.Sprintf(
-		"osascript -e 'tell application id \"%s\"' -e 'activate' -e 'set _n to \"%s\"' -e 'repeat with w in windows' -e 'if name of w contains _n then set index of w to 1' -e 'end repeat' -e 'end tell'",
+		"osascript -e 'tell application id \"%s\"' -e 'activate' -e 'set _n to \"%s\"' -e 'repeat with w in windows' -e 'if name of w contains _n then' -e 'set index of w to 1' -e 'exit repeat' -e 'end if' -e 'end repeat' -e 'end tell'",
 		safeBundleID, safeFolder,
 	)
 }
