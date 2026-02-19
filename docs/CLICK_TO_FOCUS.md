@@ -30,6 +30,15 @@ In `~/.claude/claude-notifications-go/config.json`:
 - Supported terminals: Terminal.app, iTerm2, Warp, kitty, Ghostty, WezTerm, Alacritty, Hyper, VS Code
 - To find your terminal's bundle ID: `osascript -e 'id of app "YourTerminal"'`
 
+### VS Code window focus
+
+VS Code requires two macOS permissions that other terminals do not:
+
+- **Accessibility** — to enumerate and raise windows via the AX API (other terminals use AppleScript against their own scripting dictionary)
+- **Screen Recording** — to read window titles across Spaces (macOS 10.15+); without it the correct window cannot be identified
+
+Both are requested automatically on first use via macOS system dialogs. Without Screen Recording, clicking a notification still activates VS Code but raises whichever window was last active rather than the project-specific one.
+
 ## Linux
 
 - Uses a background daemon with D-Bus for notification actions

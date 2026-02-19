@@ -4,11 +4,22 @@ package notifier
 
 /*
 #cgo CFLAGS: -x objective-c
-#cgo LDFLAGS: -framework ApplicationServices -framework AppKit
+#cgo LDFLAGS: -framework ApplicationServices -framework AppKit -framework CoreGraphics
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 #import <AppKit/AppKit.h>
 #import <ApplicationServices/ApplicationServices.h>
+#import <CoreGraphics/CoreGraphics.h>
+
+// Private CGS API declarations (stable, used by Moom/Magnet/Raycast et al.)
+typedef int CGSConnectionID;
+typedef uint64_t CGSSpaceID;
+#define CGSAllSpacesMask 7
+extern CGSConnectionID CGSMainConnectionID(void);
+extern CFArrayRef CGSCopySpacesForWindows(CGSConnectionID cid, int selector, CFArrayRef windowIDs);
+extern CGError CGSManagedDisplaySetCurrentSpace(CGSConnectionID cid, CFStringRef displayID, CGSSpaceID spaceID);
+extern CFStringRef CGSCopyBestManagedDisplayForRect(CGSConnectionID cid, CGRect rect);
 
 static int findPID(const char *bundleID) {
 	@autoreleasepool {
@@ -22,15 +33,85 @@ static int findPID(const char *bundleID) {
 static void activateByPID(int pid) {
 	@autoreleasepool {
 		NSRunningApplication *app = [NSRunningApplication runningApplicationWithProcessIdentifier:(pid_t)pid];
-		if (app) [app activateWithOptions:0];
+		if (!app) return;
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+		[app activateWithOptions:NSApplicationActivateIgnoringOtherApps];
+#pragma clang diagnostic pop
 	}
 }
 
-// raiseWindowByTitle enumerates AXWindows for the given PID and raises the
-// first window whose AXTitle contains folderName. Returns 1 on success.
-// NOTE: AXWindows only populates after the app has been activated; callers
-// must call activateByPID and wait before calling this function.
+// findWindowID returns the CGWindowID of the first window owned by pid whose
+// name contains folderName, searching across all Spaces.
+// Requires Screen Recording permission; caller must check CGPreflightScreenCaptureAccess first.
+static CGWindowID findWindowID(int pid, const char *folderName, CGRect *outBounds) {
+	@autoreleasepool {
+		*outBounds = CGRectZero;
+		CFArrayRef allInfo = CGWindowListCopyWindowInfo(
+			kCGWindowListOptionAll | kCGWindowListExcludeDesktopElements,
+			kCGNullWindowID
+		);
+		if (!allInfo) return 0;
+
+		NSString *folder = [NSString stringWithUTF8String:folderName];
+		CGWindowID targetWID = 0;
+
+		for (NSDictionary *info in (__bridge NSArray *)allInfo) {
+			NSNumber *pidNum = info[(__bridge NSString *)kCGWindowOwnerPID];
+			if (!pidNum || pidNum.intValue != pid) continue;
+			NSString *name = info[(__bridge NSString *)kCGWindowName];
+			if (!name || ![name containsString:folder]) continue;
+			NSNumber *wid = info[(__bridge NSString *)kCGWindowNumber];
+			if (!wid) continue;
+			targetWID = (CGWindowID)wid.unsignedIntValue;
+			CFDictionaryRef boundsDict = (__bridge CFDictionaryRef)info[(__bridge NSString *)kCGWindowBounds];
+			if (boundsDict) CGRectMakeWithDictionaryRepresentation(boundsDict, outBounds);
+			break;
+		}
+		CFRelease(allInfo);
+		return targetWID;
+	}
+}
+
+// switchToWindowSpace switches the current visible Space to the one containing
+// windowID, using bounds to select the correct display.
+static void switchToWindowSpace(CGWindowID windowID, CGRect bounds) {
+	@autoreleasepool {
+		CGSConnectionID conn = CGSMainConnectionID();
+		CFArrayRef spaces = CGSCopySpacesForWindows(conn, CGSAllSpacesMask,
+			(__bridge CFArrayRef)@[@(windowID)]);
+		if (!spaces) return;
+		if (CFArrayGetCount(spaces) > 0) {
+			CGSSpaceID spaceID = [(NSNumber *)CFArrayGetValueAtIndex(spaces, 0) unsignedLongLongValue];
+			CFStringRef displayID = CGSCopyBestManagedDisplayForRect(conn, bounds);
+			if (displayID) {
+				CGSManagedDisplaySetCurrentSpace(conn, displayID, spaceID);
+				CFRelease(displayID);
+			}
+		}
+		CFRelease(spaces);
+	}
+}
+
+// raiseWindowByTitle finds the window whose title contains folderName across all
+// Spaces, switches to its Space, activates the app, then raises the window via AX.
+// Returns 1 on success, 0 if window not found, -1 if Screen Recording permission is missing.
 static int raiseWindowByTitle(int pid, const char *folderName) {
+	if (!CGPreflightScreenCaptureAccess()) {
+		CGRequestScreenCaptureAccess();
+		return -1;
+	}
+
+	CGRect bounds;
+	CGWindowID targetWID = findWindowID(pid, folderName, &bounds);
+	if (!targetWID) return 0;
+
+	switchToWindowSpace(targetWID, bounds);
+	usleep(300000); // wait for Space transition animation
+
+	activateByPID(pid);
+	usleep(300000); // wait for app activation
+
 	AXUIElementRef appEl = AXUIElementCreateApplication((pid_t)pid);
 	if (!appEl) return 0;
 
@@ -71,12 +152,11 @@ import "C"
 import (
 	"fmt"
 	"path/filepath"
-	"time"
 	"unsafe"
 )
 
-// FocusAppWindow activates the bundleID app and raises the first window whose
-// AXTitle contains the base name of cwd. macOS only.
+// FocusAppWindow switches to the Space containing the bundleID app's window for
+// cwd, then raises that window. macOS only.
 func FocusAppWindow(bundleID, cwd string) error {
 	cBundleID := C.CString(bundleID)
 	defer C.free(unsafe.Pointer(cBundleID))
@@ -86,15 +166,19 @@ func FocusAppWindow(bundleID, cwd string) error {
 		return fmt.Errorf("app not running: %s", bundleID)
 	}
 
-	C.activateByPID(C.int(pid))
-	time.Sleep(800 * time.Millisecond)
-
 	folderName := filepath.Base(cwd)
 	if folderName == "" || folderName == "." || folderName == string(filepath.Separator) {
 		return fmt.Errorf("invalid cwd: %s", cwd)
 	}
 	cFolder := C.CString(folderName)
 	defer C.free(unsafe.Pointer(cFolder))
-	C.raiseWindowByTitle(C.int(pid), cFolder)
+
+	result := C.raiseWindowByTitle(C.int(pid), cFolder)
+	if result < 0 {
+		// No Screen Recording permission: fall back to plain app activation so
+		// the terminal at least comes to front, then surface the error.
+		C.activateByPID(C.int(pid))
+		return fmt.Errorf("Screen Recording permission required: grant it in System Settings → Privacy & Security → Screen Recording, then try again")
+	}
 	return nil
 }

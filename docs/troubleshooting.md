@@ -2,6 +2,26 @@
 
 Common installation and runtime issues.
 
+## macOS: VS Code click-to-focus focuses the wrong window
+
+### Symptom
+
+Clicking a notification activates VS Code but raises the wrong window (or the last-active window) instead of the project-specific one.
+
+### Why it happens
+
+VS Code window focus requires **Screen Recording** permission (macOS 10.15+) to read window titles across all Spaces. Without it, the binary falls back to plain app activation.
+
+### Fix
+
+On first use the binary requests Screen Recording access automatically — a macOS dialog will appear. If you dismissed it:
+
+1. Open **System Settings → Privacy & Security → Screen Recording**
+2. Enable access for the `claude-notifications` binary (or the terminal running Claude Code)
+3. Click the notification again
+
+Once granted, the correct VS Code window will be raised even if it is on a different Space.
+
 ## Ubuntu 24.04: `EXDEV: cross-device link not permitted` during `/plugin install`
 
 ### Symptom

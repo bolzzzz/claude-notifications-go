@@ -190,7 +190,7 @@ To disable this behavior and receive notifications even in judge mode, set in `~
 
 Clicking a notification activates your terminal window. Auto-detects terminal and platform:
 
-- **macOS** — via `terminal-notifier` with bundle ID detection
+- **macOS** — via `terminal-notifier` with bundle ID detection. VS Code requires Accessibility and Screen Recording permissions (other terminals need neither); both are requested automatically on first use.
 - **Linux** — via D-Bus daemon with fallback chain (GNOME extension, Shell Eval, wlrctl, kdotool, xdotool)
 
 Enabled by default. See **[Click-to-Focus Guide](docs/CLICK_TO_FOCUS.md)** for configuration and supported terminals.
