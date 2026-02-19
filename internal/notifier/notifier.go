@@ -118,7 +118,19 @@ func (n *Notifier) sendWithTerminalNotifier(title, message string) error {
 	}
 
 	bundleID := GetTerminalBundleID(n.cfg.Notifications.Desktop.TerminalBundleID)
-	args := buildTerminalNotifierArgs(title, message, bundleID)
+
+	var args []string
+	if IsTmux() {
+		if target, err := GetTmuxPaneTarget(); err == nil {
+			args = buildTmuxNotifierArgs(title, message, target, bundleID)
+			logging.Debug("tmux detected, using -execute with target: %s", target)
+		} else {
+			logging.Debug("tmux detected but failed to get pane target: %v, falling back to -activate", err)
+			args = buildTerminalNotifierArgs(title, message, bundleID)
+		}
+	} else {
+		args = buildTerminalNotifierArgs(title, message, bundleID)
+	}
 
 	cmd := exec.Command(notifierPath, args...)
 

@@ -637,9 +637,13 @@ func TestSendWithTerminalNotifier_Integration(t *testing.T) {
 		t.Skip("Skipping in CI - no NotificationCenter available")
 	}
 
-	// Check if terminal-notifier is available
-	if !IsTerminalNotifierAvailable() {
-		t.Skip("terminal-notifier not installed, skipping integration test")
+	// Prefer ClaudeNotifier.app if built
+	cleanup, ok := setupClaudeNotifierEnv(t)
+	defer cleanup()
+	if !ok {
+		if !IsTerminalNotifierAvailable() {
+			t.Skip("Neither ClaudeNotifier.app nor terminal-notifier available")
+		}
 	}
 
 	cfg := config.DefaultConfig()
@@ -661,26 +665,34 @@ func TestTerminalNotifier_CommandExecution(t *testing.T) {
 		t.Skip("Skipping macOS-only test")
 	}
 
-	path, err := GetTerminalNotifierPath()
-	if err != nil {
-		t.Skip("terminal-notifier not installed")
+	// Prefer ClaudeNotifier.app if built
+	cleanup, ok := setupClaudeNotifierEnv(t)
+	defer cleanup()
+	if !ok {
+		if _, err := GetTerminalNotifierPath(); err != nil {
+			t.Skip("Neither ClaudeNotifier.app nor terminal-notifier available")
+		}
 	}
 
-	// Test that terminal-notifier accepts our arguments format
-	// Use -help to verify the binary works without sending notification
+	path, err := GetTerminalNotifierPath()
+	if err != nil {
+		t.Fatalf("GetTerminalNotifierPath failed: %v", err)
+	}
+
+	t.Logf("Using notifier: %s", path)
+
+	// Test that the binary accepts -help and produces output
 	cmd := exec.Command(path, "-help")
 	output, err := cmd.CombinedOutput()
 
-	// terminal-notifier returns exit code 0 for -help
-	// and output should contain usage information
 	if err != nil {
 		// Some versions may return non-zero for -help, that's ok
-		t.Logf("terminal-notifier -help returned: %v (output: %s)", err, string(output))
+		t.Logf("-help returned: %v (output: %s)", err, string(output))
 	}
 
-	// Verify binary is executable
+	// Verify binary is executable and produces output
 	if len(output) == 0 {
-		t.Error("terminal-notifier produced no output")
+		t.Error("notifier produced no output for -help")
 	}
 }
 

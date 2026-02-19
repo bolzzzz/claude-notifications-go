@@ -88,9 +88,60 @@ jobs:
           path: dist/*
           retention-days: 1
 
+  build-notifier:
+    name: Build ClaudeNotifier.app (macOS)
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Import Apple certificate
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+        run: |
+          CERTIFICATE_PATH=$RUNNER_TEMP/certificate.p12
+          KEYCHAIN_PATH=$RUNNER_TEMP/app-signing.keychain-db
+          KEYCHAIN_PASSWORD=$(openssl rand -base64 32)
+
+          echo -n "$APPLE_CERTIFICATE" | base64 --decode > $CERTIFICATE_PATH
+
+          security create-keychain -p "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
+          security set-keychain-settings -lut 21600 $KEYCHAIN_PATH
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
+
+          security import $CERTIFICATE_PATH -P "$APPLE_CERTIFICATE_PASSWORD" \
+            -A -t cert -f pkcs12 -k $KEYCHAIN_PATH
+          security set-key-partition-list -S apple-tool:,apple: \
+            -s -k "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
+          security list-keychain -d user -s $KEYCHAIN_PATH $(security list-keychains -d user | sed s/\"//g)
+
+      - name: Build, sign, and notarize ClaudeNotifier.app
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          cd swift-notifier
+          bash scripts/build-app.sh --ci
+
+      - name: Create zip artifact
+        run: |
+          cd swift-notifier
+          ditto -c -k --keepParent ClaudeNotifier.app ClaudeNotifier.app.zip
+          ls -lh ClaudeNotifier.app.zip
+
+      - name: Upload notifier artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ClaudeNotifier
+          path: swift-notifier/ClaudeNotifier.app.zip
+          retention-days: 1
+
   create-release:
     name: Create GitHub Release
-    needs: build-matrix
+    needs: [build-matrix, build-notifier]
     runs-on: ubuntu-latest
 
     steps:

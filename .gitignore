@@ -29,6 +29,11 @@ bin/terminal-notifier.app/
 # macOS ClaudeNotifications.app (created by install.sh for notification icon)
 bin/ClaudeNotifications.app/
 
+# macOS ClaudeNotifier (built from swift-notifier/ or downloaded by install.sh)
+bin/ClaudeNotifier.app/
+swift-notifier/.build/
+swift-notifier/ClaudeNotifier.app/
+
 # Root binary (should be in bin/ instead)
 /claude-notifications
 

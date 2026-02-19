@@ -57,6 +57,36 @@ The `release.yml` workflow triggers on tag push and builds binaries for all plat
 
 Verify at: https://github.com/777genius/claude-notifications-go/releases
 
+## ClaudeNotifier.app (macOS)
+
+ClaudeNotifier.app is **automatically built, signed, and notarized** by the `release.yml`
+workflow as a `build-notifier` job. It runs in parallel with Go binary builds and the
+resulting `ClaudeNotifier.app.zip` is included in the same GitHub Release.
+
+The CI workflow:
+1. Imports the Apple Developer certificate from GitHub Secrets
+2. Builds a universal binary (arm64 + x86_64)
+3. Signs with **Developer ID Application** + hardened runtime
+4. Notarizes via `xcrun notarytool` and staples the ticket
+5. Uploads `ClaudeNotifier.app.zip` as a release asset
+
+### Required GitHub Secrets
+
+| Secret | Description |
+|--------|-------------|
+| `APPLE_CERTIFICATE` | Base64-encoded .p12 export of Developer ID Application cert |
+| `APPLE_CERTIFICATE_PASSWORD` | Password for the .p12 file |
+| `APPLE_ID` | Apple ID email for notarization |
+| `APPLE_PASSWORD` | App-specific password for notarization |
+| `APPLE_TEAM_ID` | Apple Developer Team ID |
+
+### Local build (optional)
+
+```bash
+make build-notifier              # ad-hoc or local cert signing
+make build-notifier -- --ci      # Developer ID + notarization (needs env vars)
+```
+
 ## 6. Update release description
 
 The auto-generated release description is minimal. Edit it with a human-readable summary:

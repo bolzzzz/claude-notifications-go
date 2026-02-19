@@ -4,6 +4,7 @@ package notifier
 
 import (
 	"os"
+	"path/filepath"
 	"testing"
 )
 
@@ -37,14 +38,17 @@ func TestGetTerminalBundleID_Fallback(t *testing.T) {
 	// Save and restore original env
 	originalCFBundle := os.Getenv("__CFBundleIdentifier")
 	originalTermProgram := os.Getenv("TERM_PROGRAM")
+	originalTmux := os.Getenv("TMUX")
 	defer func() {
 		os.Setenv("__CFBundleIdentifier", originalCFBundle)
 		os.Setenv("TERM_PROGRAM", originalTermProgram)
+		os.Setenv("TMUX", originalTmux)
 	}()
 
-	// Clear all env vars
+	// Clear all env vars (including TMUX to disable tmux fallback)
 	os.Unsetenv("__CFBundleIdentifier")
 	os.Unsetenv("TERM_PROGRAM")
+	os.Unsetenv("TMUX")
 
 	result := GetTerminalBundleID("")
 	if result != "com.apple.Terminal" {
@@ -56,13 +60,16 @@ func TestGetTerminalBundleID_UnknownTermProgram(t *testing.T) {
 	// Save and restore original env
 	originalCFBundle := os.Getenv("__CFBundleIdentifier")
 	originalTermProgram := os.Getenv("TERM_PROGRAM")
+	originalTmux := os.Getenv("TMUX")
 	defer func() {
 		os.Setenv("__CFBundleIdentifier", originalCFBundle)
 		os.Setenv("TERM_PROGRAM", originalTermProgram)
+		os.Setenv("TMUX", originalTmux)
 	}()
 
-	// Clear __CFBundleIdentifier, set unknown TERM_PROGRAM
+	// Clear __CFBundleIdentifier and TMUX, set unknown TERM_PROGRAM
 	os.Unsetenv("__CFBundleIdentifier")
+	os.Unsetenv("TMUX")
 	os.Setenv("TERM_PROGRAM", "UnknownTerminal")
 
 	result := GetTerminalBundleID("")
@@ -112,6 +119,30 @@ func TestGetTerminalNotifierPath(t *testing.T) {
 	} else {
 		t.Logf("terminal-notifier found at: %s", path)
 	}
+}
+
+func TestGetTerminalNotifierPath_ClaudeNotifier(t *testing.T) {
+	cleanup, ok := setupClaudeNotifierEnv(t)
+	defer cleanup()
+	if !ok {
+		t.Skip("ClaudeNotifier.app not built (run 'make build-notifier' first)")
+	}
+
+	path, err := GetTerminalNotifierPath()
+	if err != nil {
+		t.Fatalf("Expected ClaudeNotifier.app to be found, got error: %v", err)
+	}
+
+	if !filepath.IsAbs(path) {
+		t.Errorf("Expected absolute path, got: %s", path)
+	}
+
+	// Should resolve to ClaudeNotifier.app binary
+	if filepath.Base(path) != "terminal-notifier-modern" {
+		t.Errorf("Expected binary name 'terminal-notifier-modern', got: %s", filepath.Base(path))
+	}
+
+	t.Logf("ClaudeNotifier found at: %s", path)
 }
 
 func TestGetTerminalBundleID_AllMappings(t *testing.T) {
@@ -222,6 +253,45 @@ func TestGetTerminalBundleID_MultipleEnvVars(t *testing.T) {
 	if result != "com.googlecode.iterm2" {
 		t.Errorf("Expected TERM_PROGRAM mapping, got '%s'", result)
 	}
+}
+
+func TestGetTerminalBundleID_TmuxFallback(t *testing.T) {
+	// Inside tmux, TERM_PROGRAM is "tmux" — we should fall back to
+	// tmux show-environment to get the real terminal's TERM_PROGRAM
+	if os.Getenv("TMUX") == "" {
+		t.Skip("Skipping: not inside a tmux session")
+	}
+
+	// Clear env vars to force tmux fallback path
+	originalCFBundle := os.Getenv("__CFBundleIdentifier")
+	originalTermProgram := os.Getenv("TERM_PROGRAM")
+	defer func() {
+		os.Setenv("__CFBundleIdentifier", originalCFBundle)
+		os.Setenv("TERM_PROGRAM", originalTermProgram)
+	}()
+
+	os.Unsetenv("__CFBundleIdentifier")
+	os.Setenv("TERM_PROGRAM", "tmux") // simulate tmux overwrite
+
+	result := GetTerminalBundleID("")
+	// Should NOT be com.apple.Terminal (the default fallback)
+	// but the actual terminal's bundle ID from tmux environment
+	t.Logf("Detected bundle ID via tmux: %s", result)
+
+	if result == "com.apple.Terminal" {
+		// This may still happen if tmux session env doesn't have TERM_PROGRAM
+		t.Log("Warning: tmux session env didn't have TERM_PROGRAM, got fallback")
+	}
+}
+
+func TestGetBundleIDFromTmuxEnv(t *testing.T) {
+	if os.Getenv("TMUX") == "" {
+		t.Skip("Skipping: not inside a tmux session")
+	}
+
+	bundleID := getBundleIDFromTmuxEnv()
+	t.Logf("getBundleIDFromTmuxEnv() = %q", bundleID)
+	// Just verify it doesn't crash; result depends on environment
 }
 
 func TestIsTerminalNotifierAvailable_Consistency(t *testing.T) {

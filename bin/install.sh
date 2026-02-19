@@ -37,6 +37,9 @@ WGET_TIMEOUT=60
 REPO="777genius/claude-notifications-go"
 RELEASE_URL="${RELEASE_URL:-https://github.com/${REPO}/releases/latest/download}"
 CHECKSUMS_URL="${CHECKSUMS_URL:-${RELEASE_URL}/checksums.txt}"
+# ClaudeNotifier.app is built, signed with Developer ID, and notarized in CI.
+# It ships alongside Go binaries in each release.
+MODERN_NOTIFIER_URL="${MODERN_NOTIFIER_URL:-${RELEASE_URL}/ClaudeNotifier.app.zip}"
 
 # Parse command line arguments
 FORCE_UPDATE=false
@@ -283,7 +286,7 @@ check_existing() {
         rm -f "${SCRIPT_DIR}/claude-notifications" "${SCRIPT_DIR}/sound-preview" "${SCRIPT_DIR}/list-devices" "${SCRIPT_DIR}/list-sounds" 2>/dev/null
         rm -f "${SCRIPT_DIR}/claude-notifications.bat" "${SCRIPT_DIR}/sound-preview.bat" "${SCRIPT_DIR}/list-devices.bat" "${SCRIPT_DIR}/list-sounds.bat" 2>/dev/null
         # Remove macOS apps for clean reinstall
-        rm -rf "${SCRIPT_DIR}/terminal-notifier.app" "${SCRIPT_DIR}/ClaudeNotifications.app" 2>/dev/null
+        rm -rf "${SCRIPT_DIR}/terminal-notifier.app" "${SCRIPT_DIR}/ClaudeNotifier.app" "${SCRIPT_DIR}/ClaudeNotifications.app" 2>/dev/null
         rm -f "${SCRIPT_DIR}/README.markdown" 2>/dev/null
         return 1
     fi
@@ -658,7 +661,89 @@ cleanup() {
     rm -f "$CHECKSUMS_PATH" 2>/dev/null || true
 }
 
-# Download terminal-notifier for macOS (enables click-to-focus)
+# Download ClaudeNotifier for macOS (modern UNUserNotificationCenter, works on M4 Sequoia)
+download_terminal_notifier_modern() {
+    local MODERN_APP="${SCRIPT_DIR}/ClaudeNotifier.app"
+    local MODERN_URL="${MODERN_NOTIFIER_URL:-${RELEASE_URL}/ClaudeNotifier.app.zip}"
+    local TEMP_ZIP="${TMPDIR:-${TEMP:-/tmp}}/ClaudeNotifier-$$.zip"
+
+    # Check if already installed
+    if [ -d "$MODERN_APP" ] && [ -x "$MODERN_APP/Contents/MacOS/terminal-notifier-modern" ]; then
+        echo -e "${GREEN}✓${NC} ClaudeNotifier already installed"
+        return 0
+    fi
+
+    echo ""
+    echo -e "${BLUE}📦 Installing ClaudeNotifier (modern notifications + click-to-focus)...${NC}"
+
+    local attempt=1
+    local downloaded=false
+
+    while [ $attempt -le $MAX_RETRIES ]; do
+        if [ $attempt -gt 1 ]; then
+            echo -e "${YELLOW}Retry ${attempt}/${MAX_RETRIES}...${NC}"
+            sleep $RETRY_DELAY
+        fi
+
+        if command -v curl &>/dev/null; then
+            if curl -fsSL --max-time $CURL_TIMEOUT "$MODERN_URL" -o "$TEMP_ZIP" 2>/dev/null; then
+                downloaded=true
+                break
+            fi
+        elif command -v wget &>/dev/null; then
+            if wget -q --timeout=$WGET_TIMEOUT "$MODERN_URL" -O "$TEMP_ZIP" 2>/dev/null; then
+                downloaded=true
+                break
+            fi
+        fi
+
+        attempt=$((attempt + 1))
+    done
+
+    if [ "$downloaded" != true ]; then
+        echo -e "${YELLOW}⚠ Could not download ClaudeNotifier, falling back to legacy${NC}"
+        rm -f "$TEMP_ZIP" 2>/dev/null
+        return 1
+    fi
+
+    # Verify zip
+    if ! unzip -t "$TEMP_ZIP" &>/dev/null; then
+        echo -e "${YELLOW}⚠ Downloaded file is not a valid zip, falling back to legacy${NC}"
+        rm -f "$TEMP_ZIP"
+        return 1
+    fi
+
+    # Extract
+    if ! unzip -o -q "$TEMP_ZIP" -d "${SCRIPT_DIR}/" 2>&1; then
+        echo -e "${YELLOW}⚠ Could not extract ClaudeNotifier${NC}"
+        rm -f "$TEMP_ZIP"
+        return 1
+    fi
+
+    rm -f "$TEMP_ZIP"
+
+    # Verify extraction
+    if [ -d "$MODERN_APP" ] && [ -x "$MODERN_APP/Contents/MacOS/terminal-notifier-modern" ]; then
+        # Remove quarantine attribute (downloaded files are flagged by Gatekeeper)
+        xattr -cr "$MODERN_APP" 2>/dev/null || true
+        # Verify code signature (notarized builds have valid Developer ID signature)
+        if codesign --verify --verbose "$MODERN_APP" 2>/dev/null; then
+            echo -e "${GREEN}✓${NC} Code signature verified"
+        else
+            echo -e "${YELLOW}⚠${NC} Code signature verification failed (app may still work)"
+        fi
+        # Register with Launch Services
+        /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -f "$MODERN_APP" 2>/dev/null || true
+        echo -e "${GREEN}✓${NC} ClaudeNotifier installed (modern notifications + click-to-focus)"
+        return 0
+    else
+        echo -e "${YELLOW}⚠ ClaudeNotifier extraction incomplete, falling back to legacy${NC}"
+        rm -rf "$MODERN_APP" 2>/dev/null
+        return 1
+    fi
+}
+
+# Download terminal-notifier for macOS (legacy, enables click-to-focus)
 download_terminal_notifier() {
     local NOTIFIER_URL="${NOTIFIER_URL:-https://github.com/julienXX/terminal-notifier/releases/download/2.0.0/terminal-notifier-2.0.0.zip}"
     local NOTIFIER_APP="${SCRIPT_DIR}/terminal-notifier.app"
@@ -977,6 +1062,16 @@ main() {
     echo -e "${BLUE}Binary:${NC}   ${BINARY_NAME}"
     echo ""
 
+    # When force-updating, verify GitHub is reachable BEFORE deleting anything.
+    # Otherwise a network outage leaves the user with no binary at all.
+    if [ "$FORCE_UPDATE" = true ]; then
+        if ! check_github_availability; then
+            echo ""
+            echo -e "${YELLOW}⚠ Keeping existing installation (GitHub unreachable)${NC}"
+            return 0
+        fi
+    fi
+
     # Check if already installed
     if check_existing; then
         # Even if binary exists, ensure symlink is created
@@ -985,9 +1080,9 @@ main() {
         # Download utility binaries (sound-preview, list-devices)
         download_utilities
 
-        # On macOS, also check terminal-notifier and create notification app
+        # On macOS, also check ClaudeNotifier (preferred) or legacy terminal-notifier
         if [ "$PLATFORM" = "darwin" ]; then
-            download_terminal_notifier
+            download_terminal_notifier_modern || download_terminal_notifier
             # Icon app is optional - don't fail if icon not found
             create_claude_notifications_app || true
         fi
@@ -1091,9 +1186,9 @@ main() {
     # Download utility binaries (sound-preview, list-devices)
     download_utilities
 
-    # On macOS, download terminal-notifier and create notification app
+    # On macOS, download ClaudeNotifier (preferred) or legacy terminal-notifier
     if [ "$PLATFORM" = "darwin" ]; then
-        download_terminal_notifier
+        download_terminal_notifier_modern || download_terminal_notifier
         # Icon app is optional - don't fail if icon not found
         create_claude_notifications_app || true
     fi
@@ -1121,7 +1216,11 @@ main() {
     echo -e "${GREEN}✓${NC} Checksum verified"
     echo -e "${GREEN}✓${NC} Symlinks created"
     if [ "$PLATFORM" = "darwin" ]; then
-        echo -e "${GREEN}✓${NC} terminal-notifier installed (click-to-focus)"
+        if [ -d "${SCRIPT_DIR}/ClaudeNotifier.app" ]; then
+            echo -e "${GREEN}✓${NC} ClaudeNotifier installed (modern notifications + click-to-focus)"
+        else
+            echo -e "${GREEN}✓${NC} terminal-notifier installed (click-to-focus)"
+        fi
         echo -e "${GREEN}✓${NC} Claude icon configured for notifications"
     fi
     if [ "$PLATFORM" = "linux" ]; then

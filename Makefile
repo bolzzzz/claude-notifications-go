@@ -1,4 +1,4 @@
-.PHONY: build test test-race lint clean install help
+.PHONY: build test test-race lint clean install help build-notifier
 
 # Binary names
 BINARY=claude-notifications
@@ -88,6 +88,12 @@ rebuild-and-commit: build-all ## Rebuild optimized binaries and prepare for comm
 	@ls -1 bin/claude-notifications-* 2>/dev/null || echo "  (none found)"
 	@echo ""
 	@echo "To commit: git add bin/claude-notifications-* && git commit -m 'chore: rebuild binaries'"
+
+# Swift notifier (macOS only)
+build-notifier: ## Build ClaudeNotifier .app bundle (macOS)
+	@echo "Building ClaudeNotifier..."
+	@cd swift-notifier && bash scripts/build-app.sh
+	@echo "Done! Bundle at swift-notifier/ClaudeNotifier.app"
 
 # Help
 help: ## Show this help message

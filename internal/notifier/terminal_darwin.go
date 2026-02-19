@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 
 	"github.com/777genius/claude-notifications/internal/config"
 	"github.com/777genius/claude-notifications/internal/platform"
@@ -30,7 +31,8 @@ var terminalBundleIDMap = map[string]string{
 // 1. configOverride (if provided)
 // 2. __CFBundleIdentifier env var (set by some terminals like Warp)
 // 3. TERM_PROGRAM env var mapped to known bundle IDs
-// 4. Fallback to com.apple.Terminal
+// 4. Inside tmux: TERM_PROGRAM from tmux session environment
+// 5. Fallback to com.apple.Terminal
 func GetTerminalBundleID(configOverride string) string {
 	// 1. Use config override if provided
 	if configOverride != "" {
@@ -49,26 +51,72 @@ func GetTerminalBundleID(configOverride string) string {
 		}
 	}
 
-	// 4. Fallback to standard Terminal.app
+	// 4. Inside tmux: check TERM_PROGRAM from tmux session environment
+	if IsTmux() {
+		if bundleID := getBundleIDFromTmuxEnv(); bundleID != "" {
+			return bundleID
+		}
+	}
+
+	// 5. Fallback to standard Terminal.app
 	return "com.apple.Terminal"
+}
+
+// getBundleIDFromTmuxEnv retrieves TERM_PROGRAM from the tmux environment.
+// Inside tmux, TERM_PROGRAM is overwritten to "tmux", but the original value
+// is preserved in tmux's global environment (set by the terminal that started tmux).
+func getBundleIDFromTmuxEnv() string {
+	// Try session environment first, then global
+	for _, flag := range []string{"", "-g"} {
+		args := []string{"show-environment"}
+		if flag != "" {
+			args = append(args, flag)
+		}
+		args = append(args, "TERM_PROGRAM")
+
+		cmd := exec.Command("tmux", args...)
+		output, err := cmd.Output()
+		if err != nil {
+			continue
+		}
+		// Output format: "TERM_PROGRAM=WarpTerminal\n"
+		line := strings.TrimSpace(string(output))
+		parts := strings.SplitN(line, "=", 2)
+		if len(parts) != 2 {
+			continue
+		}
+		if bundleID, ok := terminalBundleIDMap[parts[1]]; ok {
+			return bundleID
+		}
+	}
+	return ""
 }
 
 // GetTerminalNotifierPath returns the path to terminal-notifier binary.
 // Priority:
-// 1. Embedded in plugin: ${CLAUDE_PLUGIN_ROOT}/bin/terminal-notifier.app/Contents/MacOS/terminal-notifier
-// 2. System-installed (via brew): $(which terminal-notifier)
+// 1. terminal-notifier-modern (embedded in plugin): uses UNUserNotificationCenter, works on macOS 10.14+
+// 2. terminal-notifier (embedded in plugin): legacy NSUserNotificationCenter
+// 3. System-installed (via brew): $(which terminal-notifier)
 func GetTerminalNotifierPath() (string, error) {
-	// 1. Check embedded version in plugin
 	pluginRoot := os.Getenv("CLAUDE_PLUGIN_ROOT")
+
 	if pluginRoot != "" {
-		embeddedPath := filepath.Join(pluginRoot, "bin",
+		// 1. Check ClaudeNotifier (preferred — modern UNUserNotificationCenter with Claude icon)
+		modernPath := filepath.Join(pluginRoot, "bin",
+			"ClaudeNotifier.app", "Contents", "MacOS", "terminal-notifier-modern")
+		if platform.FileExists(modernPath) {
+			return modernPath, nil
+		}
+
+		// 2. Check legacy terminal-notifier
+		legacyPath := filepath.Join(pluginRoot, "bin",
 			"terminal-notifier.app", "Contents", "MacOS", "terminal-notifier")
-		if platform.FileExists(embeddedPath) {
-			return embeddedPath, nil
+		if platform.FileExists(legacyPath) {
+			return legacyPath, nil
 		}
 	}
 
-	// 2. Check system installation (brew install terminal-notifier)
+	// 3. Check system installation (brew install terminal-notifier)
 	if path, err := exec.LookPath("terminal-notifier"); err == nil {
 		return path, nil
 	}
