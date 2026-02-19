@@ -174,11 +174,14 @@ func FocusAppWindow(bundleID, cwd string) error {
 	defer C.free(unsafe.Pointer(cFolder))
 
 	result := C.raiseWindowByTitle(C.int(pid), cFolder)
-	if result < 0 {
+	switch {
+	case result < 0:
 		// No Screen Recording permission: fall back to plain app activation so
 		// the terminal at least comes to front, then surface the error.
 		C.activateByPID(C.int(pid))
 		return fmt.Errorf("Screen Recording permission required: grant it in System Settings → Privacy & Security → Screen Recording, then try again")
+	case result == 0:
+		return fmt.Errorf("window not found for %s (cwd: %s)", bundleID, cwd)
 	}
 	return nil
 }

@@ -130,6 +130,8 @@ func printUsage() {
 	fmt.Println("                          HookName: PreToolUse, Stop, SubagentStop, Notification")
 	fmt.Println("  daemon                  Run the notification daemon (Linux only)")
 	fmt.Println("                          For click-to-focus support on desktop notifications")
+	fmt.Println("  focus-window <bundleID> <cwd>")
+	fmt.Println("                          Focus specific VS Code window (internal, used by click-to-focus)")
 	fmt.Println("  version                 Show version information")
 	fmt.Println("  help                    Show this help message")
 	fmt.Println()

@@ -19,6 +19,12 @@ import (
 	"github.com/godbus/dbus/v5"
 )
 
+// focusInfo holds the focus target and folder for a notification.
+type focusInfo struct {
+	target string
+	folder string
+}
+
 // Server is the notification daemon server
 type Server struct {
 	conn      *dbus.Conn
@@ -26,10 +32,9 @@ type Server struct {
 	listener  net.Listener
 	startTime time.Time
 
-	// Focus context mapping: notification ID -> focus target and folder
-	focusCtx       map[uint32]string
-	focusFolderCtx map[uint32]string
-	focusCtxMu     sync.RWMutex
+	// Focus context mapping: notification ID -> focus info
+	focusCtx   map[uint32]focusInfo
+	focusCtxMu sync.RWMutex
 
 	// Idle timeout for auto-shutdown
 	idleTimeout  time.Duration
@@ -66,8 +71,7 @@ func NewServer(cfg ServerConfig) (*Server, error) {
 	s := &Server{
 		conn:           conn,
 		startTime:      time.Now(),
-		focusCtx:       make(map[uint32]string),
-		focusFolderCtx: make(map[uint32]string),
+		focusCtx: make(map[uint32]focusInfo),
 		idleTimeout:    cfg.IdleTimeout,
 		lastActivity:   time.Now(),
 		done:           make(chan struct{}),
@@ -269,8 +273,7 @@ func (s *Server) handleNotification(req *NotifyRequest) (*NotifyResponse, error)
 
 	// Store focus context
 	s.focusCtxMu.Lock()
-	s.focusCtx[id] = focusTarget
-	s.focusFolderCtx[id] = req.FocusFolder
+	s.focusCtx[id] = focusInfo{target: focusTarget, folder: req.FocusFolder}
 	s.focusCtxMu.Unlock()
 
 	log.Printf("[INFO] Notification sent: ID=%d, focus_target=%s, focus_folder=%s", id, focusTarget, req.FocusFolder)
@@ -291,9 +294,10 @@ func (s *Server) onActionInvoked(sig *notify.ActionInvokedSignal) {
 
 	// Get focus target
 	s.focusCtxMu.RLock()
-	focusTarget, exists := s.focusCtx[sig.ID]
-	focusFolder := s.focusFolderCtx[sig.ID]
+	info, exists := s.focusCtx[sig.ID]
 	s.focusCtxMu.RUnlock()
+	focusTarget := info.target
+	focusFolder := info.folder
 
 	if !exists {
 		log.Printf("[WARN] No focus context for notification %d", sig.ID)
@@ -311,7 +315,6 @@ func (s *Server) onActionInvoked(sig *notify.ActionInvokedSignal) {
 	// Clean up focus context
 	s.focusCtxMu.Lock()
 	delete(s.focusCtx, sig.ID)
-	delete(s.focusFolderCtx, sig.ID)
 	s.focusCtxMu.Unlock()
 }
 
@@ -320,7 +323,6 @@ func (s *Server) onNotificationClosed(sig *notify.NotificationClosedSignal) {
 	// Clean up focus context
 	s.focusCtxMu.Lock()
 	delete(s.focusCtx, sig.ID)
-	delete(s.focusFolderCtx, sig.ID)
 	s.focusCtxMu.Unlock()
 }
 

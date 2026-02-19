@@ -1019,6 +1019,19 @@ func TestBuildFocusScript_VSCode_UsesBinaryCallback(t *testing.T) {
 	}
 }
 
+func TestBuildFocusScript_VSCodeInsiders_UsesBinaryCallback(t *testing.T) {
+	script := buildFocusScript("com.microsoft.VSCodeInsiders", "/home/user/my-project")
+	if !strings.Contains(script, "focus-window") {
+		t.Errorf("VS Code Insiders focus script should use focus-window subcommand, got: %s", script)
+	}
+	if !strings.Contains(script, "com.microsoft.VSCodeInsiders") {
+		t.Errorf("VS Code Insiders focus script should contain bundle ID, got: %s", script)
+	}
+	if strings.Contains(script, "osascript") {
+		t.Errorf("VS Code Insiders focus script should not use osascript, got: %s", script)
+	}
+}
+
 func TestBuildFocusScript_NonVSCode_UsesAppleScript(t *testing.T) {
 	script := buildFocusScript("com.googlecode.iterm2", "/home/user/my-project")
 	if !strings.Contains(script, "osascript") {
@@ -1064,7 +1077,7 @@ func TestSanitizeForAppleScript(t *testing.T) {
 		expected string
 	}{
 		{"normal-project", "normal-project"},
-		{"with'single", "withsingle"},
+		{"with'single", `with'\''single`},
 		{`with"double`, "withdouble"},
 		{`with\backslash`, "withbackslash"},
 		{"my project", "my project"}, // spaces allowed

@@ -133,12 +133,8 @@ func GetSearchTermWithFolder(terminalName, folderName string) string {
 		if folderName != "" {
 			return folderName
 		}
-		return "Visual Studio Code"
-	case "gnome-terminal":
-		return "Terminal"
-	default:
-		return terminalName
 	}
+	return GetSearchTerm(terminalName)
 }
 
 // GetTerminalName detects the current terminal from environment variables.

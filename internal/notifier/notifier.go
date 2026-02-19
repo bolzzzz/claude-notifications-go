@@ -230,9 +230,10 @@ func buildFocusScript(bundleID, cwd string) string {
 	return buildAppleScriptFocusScript(bundleID, folderName)
 }
 
-// isVSCodeBundleID reports whether bundleID is VS Code.
+// isVSCodeBundleID reports whether bundleID is VS Code or VS Code Insiders.
 func isVSCodeBundleID(bundleID string) bool {
-	return bundleID == "com.microsoft.VSCode"
+	return bundleID == "com.microsoft.VSCode" ||
+		bundleID == "com.microsoft.VSCodeInsiders"
 }
 
 // shellQuote wraps s in single quotes, escaping internal single quotes
@@ -264,12 +265,20 @@ func buildAppleScriptFocusScript(bundleID, folderName string) string {
 	)
 }
 
-// sanitizeForAppleScript removes characters that would break AppleScript string literals
-// or shell single-quote delimiters when embedded in a -execute command.
+// sanitizeForAppleScript escapes or removes characters that would break AppleScript
+// string literals or shell single-quote delimiters when embedded in a -execute command.
+// Single quotes are escaped using the shell '\'' technique; double quotes and backslashes
+// are stripped (rare in macOS folder names; double-quoting AppleScript strings doesn't
+// support "" escaping without restructuring the script).
 func sanitizeForAppleScript(s string) string {
 	var b strings.Builder
 	for _, r := range s {
-		if r != '\'' && r != '"' && r != '\\' {
+		switch r {
+		case '\'':
+			b.WriteString(`'\''`)
+		case '"', '\\':
+			// strip
+		default:
 			b.WriteRune(r)
 		}
 	}
