@@ -40,15 +40,17 @@ type mockNotifier struct {
 type notificationCall struct {
 	status  analyzer.Status
 	message string
+	cwd     string
 }
 
-func (m *mockNotifier) SendDesktop(status analyzer.Status, message, sessionID string) error {
+func (m *mockNotifier) SendDesktop(status analyzer.Status, message, sessionID, cwd string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
 	m.calls = append(m.calls, notificationCall{
 		status:  status,
 		message: message,
+		cwd:     cwd,
 	})
 
 	if m.shouldFail {

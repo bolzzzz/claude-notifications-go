@@ -48,8 +48,9 @@ type Response struct {
 type NotifyRequest struct {
 	Title       string `json:"title"`
 	Body        string `json:"body"`
-	FocusTarget string `json:"focus_target"` // Terminal identifier (empty = auto-detect)
-	Timeout     int    `json:"timeout"`      // Notification timeout in seconds
+	FocusTarget string `json:"focus_target"`           // Terminal identifier (empty = auto-detect)
+	FocusFolder string `json:"focus_folder,omitempty"` // Project folder name for window-specific focus
+	Timeout     int    `json:"timeout"`                // Notification timeout in seconds
 }
 
 // NotifyResponse contains the result of a notification request

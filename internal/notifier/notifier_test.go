@@ -301,7 +301,7 @@ func TestSendDesktop_AllStatuses(t *testing.T) {
 	for _, status := range statuses {
 		t.Run(string(status), func(t *testing.T) {
 			// Should not panic for any status
-			err := n.SendDesktop(status, "[test] Message for "+string(status), "test-session")
+			err := n.SendDesktop(status, "[test] Message for "+string(status), "test-session", "")
 			// Error is acceptable (notifications may not work in CI)
 			_ = err
 		})
@@ -539,7 +539,7 @@ func TestNotifier_ConfigAccess(t *testing.T) {
 // === Tests for buildTerminalNotifierArgs ===
 
 func TestBuildTerminalNotifierArgs_Basic(t *testing.T) {
-	args := buildTerminalNotifierArgs("Test Title", "Test Message", "com.test.app")
+	args := buildTerminalNotifierArgs("Test Title", "Test Message", "com.test.app", "")
 
 	// Check required arguments
 	if !containsArg(args, "-title", "Test Title") {
@@ -570,7 +570,7 @@ func TestBuildTerminalNotifierArgs_Basic(t *testing.T) {
 func TestBuildTerminalNotifierArgs_NoSender(t *testing.T) {
 	// -sender was removed because it conflicts with -activate on macOS Sequoia (15.x)
 	// This test verifies that -sender is NOT present
-	args := buildTerminalNotifierArgs("Title", "Message", "com.test.app")
+	args := buildTerminalNotifierArgs("Title", "Message", "com.test.app", "")
 
 	for _, arg := range args {
 		if arg == "-sender" {
@@ -585,6 +585,7 @@ func TestBuildTerminalNotifierArgs_SpecialCharacters(t *testing.T) {
 		"Task Complete [session-1]",
 		"Created 3 files. Edited 2 files. Took 2m 15s",
 		"com.googlecode.iterm2",
+		"",
 	)
 
 	if !containsArg(args, "-title", "Task Complete [session-1]") {
@@ -597,7 +598,7 @@ func TestBuildTerminalNotifierArgs_SpecialCharacters(t *testing.T) {
 
 func TestBuildTerminalNotifierArgs_EmptyValues(t *testing.T) {
 	// Test with empty title/message (edge case)
-	args := buildTerminalNotifierArgs("", "", "com.test.app")
+	args := buildTerminalNotifierArgs("", "", "com.test.app", "")
 
 	if !containsArg(args, "-title", "") {
 		t.Error("Empty title should still be present")
@@ -609,9 +610,9 @@ func TestBuildTerminalNotifierArgs_EmptyValues(t *testing.T) {
 
 func TestBuildTerminalNotifierArgs_UniqueGroupID(t *testing.T) {
 	// Two calls should produce different group IDs
-	args1 := buildTerminalNotifierArgs("Title", "Msg", "com.test")
+	args1 := buildTerminalNotifierArgs("Title", "Msg", "com.test", "")
 	time.Sleep(time.Nanosecond) // Ensure different timestamp
-	args2 := buildTerminalNotifierArgs("Title", "Msg", "com.test")
+	args2 := buildTerminalNotifierArgs("Title", "Msg", "com.test", "")
 
 	group1 := getArgValue(args1, "-group")
 	group2 := getArgValue(args2, "-group")
@@ -686,7 +687,7 @@ func getArgValue(args []string, flag string) string {
 // === Tests for terminal-notifier argument validation ===
 
 func TestBuildTerminalNotifierArgs_ArgumentOrder(t *testing.T) {
-	args := buildTerminalNotifierArgs("Title", "Message", "com.test.app")
+	args := buildTerminalNotifierArgs("Title", "Message", "com.test.app", "")
 
 	// Verify argument structure: each flag should be followed by its value
 	// Note: -sender was removed because it conflicts with -activate on macOS Sequoia
@@ -705,7 +706,7 @@ func TestBuildTerminalNotifierArgs_ArgumentOrder(t *testing.T) {
 }
 
 func TestBuildTerminalNotifierArgs_NoNilValues(t *testing.T) {
-	args := buildTerminalNotifierArgs("Title", "Message", "com.test")
+	args := buildTerminalNotifierArgs("Title", "Message", "com.test", "")
 
 	for i, arg := range args {
 		if arg == "" && i > 0 && args[i-1] != "-title" && args[i-1] != "-message" {
@@ -716,7 +717,7 @@ func TestBuildTerminalNotifierArgs_NoNilValues(t *testing.T) {
 }
 
 func TestBuildTerminalNotifierArgs_GroupIDFormat(t *testing.T) {
-	args := buildTerminalNotifierArgs("Title", "Message", "com.test")
+	args := buildTerminalNotifierArgs("Title", "Message", "com.test", "")
 
 	groupID := getArgValue(args, "-group")
 	if groupID == "" {
@@ -752,7 +753,7 @@ func TestSendWithTerminalNotifier_PathNotFound(t *testing.T) {
 
 	// This may succeed if terminal-notifier is installed system-wide
 	// or fail if not - both are valid outcomes
-	err := n.sendWithTerminalNotifier("Test", "Message", "", "", false)
+	err := n.sendWithTerminalNotifier("Test", "Message", "", "", false, "")
 	_ = err // We just want to exercise the code path
 }
 
@@ -911,7 +912,7 @@ func TestSendDesktop_BellDisabledByConfig(t *testing.T) {
 }
 
 func TestBuildTerminalNotifierArgs_AllKnownBundleIDs(t *testing.T) {
-	// Test with all known bundle IDs from the mapping
+	// Without cwd, all bundle IDs should use -activate (existing behavior)
 	bundleIDs := []string{
 		"com.apple.Terminal",
 		"com.googlecode.iterm2",
@@ -925,7 +926,7 @@ func TestBuildTerminalNotifierArgs_AllKnownBundleIDs(t *testing.T) {
 	}
 
 	for _, bundleID := range bundleIDs {
-		args := buildTerminalNotifierArgs("Title", "Message", bundleID)
+		args := buildTerminalNotifierArgs("Title", "Message", bundleID, "")
 		actualBundleID := getArgValue(args, "-activate")
 		if actualBundleID != bundleID {
 			t.Errorf("Bundle ID mismatch: expected %s, got %s", bundleID, actualBundleID)
@@ -989,5 +990,117 @@ func TestSendDesktop_SubtitleBranchOnly(t *testing.T) {
 	parts := strings.SplitN(gitBranch, " ", 2)
 	if len(parts) != 1 {
 		t.Errorf("expected 1 part for branch-only, got %d", len(parts))
+	}
+}
+
+// === Tests for buildFocusScript and helpers ===
+
+func TestBuildFocusScript_EmptyCWD(t *testing.T) {
+	script := buildFocusScript("com.microsoft.VSCode", "")
+	if script != "" {
+		t.Errorf("buildFocusScript with empty cwd should return empty, got: %s", script)
+	}
+}
+
+func TestBuildFocusScript_VSCode_UsesCLI(t *testing.T) {
+	script := buildFocusScript("com.microsoft.VSCode", "/home/user/my-project")
+	if !strings.Contains(script, "code --reuse-window") {
+		t.Errorf("VS Code focus script should use 'code --reuse-window', got: %s", script)
+	}
+	if !strings.Contains(script, "/home/user/my-project") {
+		t.Errorf("VS Code focus script should contain the cwd path, got: %s", script)
+	}
+}
+
+func TestBuildFocusScript_VSCode_HasAppleScriptFallback(t *testing.T) {
+	script := buildFocusScript("com.microsoft.VSCode", "/home/user/my-project")
+	if !strings.Contains(script, "osascript") {
+		t.Errorf("VS Code focus script should include AppleScript fallback, got: %s", script)
+	}
+	if !strings.Contains(script, "||") {
+		t.Errorf("VS Code focus script should have || fallback, got: %s", script)
+	}
+}
+
+func TestBuildFocusScript_VSCodeInsiders(t *testing.T) {
+	script := buildFocusScript("com.microsoft.VSCodeInsiders", "/home/user/proj")
+	if !strings.Contains(script, "code-insiders") {
+		t.Errorf("VS Code Insiders should use 'code-insiders', got: %s", script)
+	}
+}
+
+func TestBuildFocusScript_NonVSCode_UsesAppleScript(t *testing.T) {
+	script := buildFocusScript("com.googlecode.iterm2", "/home/user/my-project")
+	if !strings.Contains(script, "osascript") {
+		t.Errorf("Non-VS Code focus script should use osascript, got: %s", script)
+	}
+	if !strings.Contains(script, "my-project") {
+		t.Errorf("Non-VS Code focus script should contain folder name, got: %s", script)
+	}
+	// Should NOT use code CLI
+	if strings.Contains(script, "code --reuse-window") {
+		t.Errorf("Non-VS Code focus script should not use code CLI, got: %s", script)
+	}
+}
+
+func TestBuildTerminalNotifierArgs_WithCWD_UsesExecute(t *testing.T) {
+	args := buildTerminalNotifierArgs("Title", "Message", "com.microsoft.VSCode", "/home/user/proj")
+	if containsArg(args, "-activate", "com.microsoft.VSCode") {
+		t.Error("When cwd is set, should use -execute not -activate")
+	}
+	execVal := getArgValue(args, "-execute")
+	if execVal == "" {
+		t.Error("When cwd is set, -execute should be present")
+	}
+}
+
+func TestBuildTerminalNotifierArgs_WithCWD_TerminalUsesAppleScript(t *testing.T) {
+	args := buildTerminalNotifierArgs("Title", "Message", "com.googlecode.iterm2", "/home/user/my-project")
+	execVal := getArgValue(args, "-execute")
+	if execVal == "" {
+		t.Error("-execute should be present when cwd is set")
+	}
+	if !strings.Contains(execVal, "osascript") {
+		t.Errorf("-execute value should contain osascript, got: %s", execVal)
+	}
+	if !strings.Contains(execVal, "my-project") {
+		t.Errorf("-execute value should contain folder name, got: %s", execVal)
+	}
+}
+
+func TestShellQuote(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected string
+	}{
+		{"/simple/path", "'/simple/path'"},
+		{"/path with spaces/foo", "'/path with spaces/foo'"},
+		{"/path/with'quote", "'/path/with'\\''quote'"},
+		{"", "''"},
+	}
+	for _, tt := range tests {
+		got := shellQuote(tt.input)
+		if got != tt.expected {
+			t.Errorf("shellQuote(%q) = %q, want %q", tt.input, got, tt.expected)
+		}
+	}
+}
+
+func TestSanitizeForAppleScript(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected string
+	}{
+		{"normal-project", "normal-project"},
+		{"with'single", "withsingle"},
+		{`with"double`, "withdouble"},
+		{`with\backslash`, "withbackslash"},
+		{"my project", "my project"}, // spaces allowed
+	}
+	for _, tt := range tests {
+		got := sanitizeForAppleScript(tt.input)
+		if got != tt.expected {
+			t.Errorf("sanitizeForAppleScript(%q) = %q, want %q", tt.input, got, tt.expected)
+		}
 	}
 }

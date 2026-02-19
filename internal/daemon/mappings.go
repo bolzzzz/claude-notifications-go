@@ -125,6 +125,22 @@ func GetSearchTerm(terminalName string) string {
 	}
 }
 
+// GetSearchTermWithFolder returns the window title search term, using the project
+// folder name for VS Code when available (more specific than "Visual Studio Code").
+func GetSearchTermWithFolder(terminalName, folderName string) string {
+	switch strings.ToLower(terminalName) {
+	case "code", "vscode", "visual studio code":
+		if folderName != "" {
+			return folderName
+		}
+		return "Visual Studio Code"
+	case "gnome-terminal":
+		return "Terminal"
+	default:
+		return terminalName
+	}
+}
+
 // GetTerminalName detects the current terminal from environment variables.
 func GetTerminalName() string {
 	// Try TERM_PROGRAM first (set by many terminals)

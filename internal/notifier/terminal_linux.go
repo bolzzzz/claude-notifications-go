@@ -6,6 +6,7 @@ package notifier
 
 import (
 	"fmt"
+	"path/filepath"
 
 	"github.com/777genius/claude-notifications/internal/config"
 	"github.com/777genius/claude-notifications/internal/daemon"
@@ -40,7 +41,8 @@ func EnsureClaudeNotificationsApp() error {
 // sendLinuxNotification sends a notification on Linux.
 // When clickToFocus is enabled, uses the daemon for click-to-focus support.
 // Falls back to beeep when daemon is unavailable.
-func sendLinuxNotification(title, body, appIcon string, cfg *config.Config) error {
+// cwd is the working directory of the project; used for window-specific focus. May be empty.
+func sendLinuxNotification(title, body, appIcon string, cfg *config.Config, cwd string) error {
 	// If click-to-focus is disabled, use beeep directly
 	if !cfg.Notifications.Desktop.ClickToFocus {
 		logging.Debug("Click-to-focus disabled, using beeep directly")
@@ -48,7 +50,7 @@ func sendLinuxNotification(title, body, appIcon string, cfg *config.Config) erro
 	}
 
 	// Try to use daemon for click-to-focus
-	if err := sendViaDaemon(title, body); err == nil {
+	if err := sendViaDaemon(title, body, cwd); err == nil {
 		logging.Debug("Notification sent via daemon with click-to-focus support")
 		return nil
 	} else {
@@ -61,7 +63,8 @@ func sendLinuxNotification(title, body, appIcon string, cfg *config.Config) erro
 
 // sendViaDaemon sends a notification via the background daemon.
 // Returns an error if daemon is not available or fails.
-func sendViaDaemon(title, body string) error {
+// cwd is used to extract the project folder name for window-specific focus.
+func sendViaDaemon(title, body, cwd string) error {
 	// Start daemon on-demand (no-op if already running)
 	if !daemon.StartDaemonOnDemand() {
 		return daemon.ErrDaemonNotAvailable
@@ -73,8 +76,14 @@ func sendViaDaemon(title, body string) error {
 		return err
 	}
 
+	// Extract folder name from cwd for title-based window focus
+	folderName := ""
+	if cwd != "" {
+		folderName = filepath.Base(cwd)
+	}
+
 	// Send notification with 30 second timeout, auto-detect terminal
-	_, err = client.SendNotification(title, body, "", 30)
+	_, err = client.SendNotification(title, body, "", folderName, 30)
 	return err
 }
 

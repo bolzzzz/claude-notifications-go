@@ -13,7 +13,7 @@ import (
 // FocusMethod represents a method for focusing a window
 type FocusMethod struct {
 	Name string
-	Fn   func(terminalName string) error
+	Fn   func(terminalName, folderName string) error
 }
 
 // GetFocusMethods returns the ordered list of focus methods to try
@@ -30,13 +30,14 @@ func GetFocusMethods() []FocusMethod {
 }
 
 // TryFocus attempts to focus a window using available tools.
+// folderName is the project folder name used for title-based window search (may be empty).
 // It tries each method in order until one succeeds.
-func TryFocus(terminalName string) error {
+func TryFocus(terminalName, folderName string) error {
 	methods := GetFocusMethods()
 
 	var lastErr error
 	for _, method := range methods {
-		if err := method.Fn(terminalName); err != nil {
+		if err := method.Fn(terminalName, folderName); err != nil {
 			lastErr = err
 			continue
 		}
@@ -49,8 +50,8 @@ func TryFocus(terminalName string) error {
 // TryActivateWindowByTitle uses the activate-window-by-title GNOME extension.
 // https://extensions.gnome.org/extension/5021/activate-window-by-title/
 // This method does NOT require unsafe_mode and works on GNOME 42+.
-func TryActivateWindowByTitle(terminalName string) error {
-	searchTerm := GetSearchTerm(terminalName)
+func TryActivateWindowByTitle(terminalName, folderName string) error {
+	searchTerm := GetSearchTermWithFolder(terminalName, folderName)
 
 	cmd := exec.Command("busctl", "--user", "call",
 		"org.gnome.Shell",
@@ -67,8 +68,8 @@ func TryActivateWindowByTitle(terminalName string) error {
 
 // TryGnomeShellEvalByTitle uses GNOME Shell's Eval to find and focus window by title.
 // Requires unsafe_mode or development-tools enabled.
-func TryGnomeShellEvalByTitle(terminalName string) error {
-	searchTerm := escapeJS(GetSearchTerm(terminalName))
+func TryGnomeShellEvalByTitle(terminalName, folderName string) error {
+	searchTerm := escapeJS(GetSearchTermWithFolder(terminalName, folderName))
 
 	// JavaScript to find window by title and activate it
 	js := fmt.Sprintf(`
@@ -112,7 +113,7 @@ func TryGnomeShellEvalByTitle(terminalName string) error {
 
 // TryGnomeShellEval uses GNOME Shell's Eval method to activate an app.
 // Requires unsafe_mode or development-tools enabled.
-func TryGnomeShellEval(terminalName string) error {
+func TryGnomeShellEval(terminalName, folderName string) error {
 	appID := escapeJS(GetAppID(terminalName))
 
 	// JavaScript to find and activate the app's windows
@@ -151,7 +152,7 @@ func TryGnomeShellEval(terminalName string) error {
 }
 
 // TryGnomeFocusApp uses GNOME Shell's FocusApp method (available since GNOME 45).
-func TryGnomeFocusApp(terminalName string) error {
+func TryGnomeFocusApp(terminalName, folderName string) error {
 	appID := GetAppID(terminalName)
 
 	cmd := exec.Command("gdbus", "call",
@@ -169,7 +170,7 @@ func TryGnomeFocusApp(terminalName string) error {
 }
 
 // TryWlrctl uses wlrctl for wlroots-based compositors (Sway, etc.).
-func TryWlrctl(terminalName string) error {
+func TryWlrctl(terminalName, folderName string) error {
 	if _, err := exec.LookPath("wlrctl"); err != nil {
 		return fmt.Errorf("wlrctl not installed")
 	}
@@ -182,7 +183,7 @@ func TryWlrctl(terminalName string) error {
 	}
 
 	// Fallback to title
-	searchTerm := GetSearchTerm(terminalName)
+	searchTerm := GetSearchTermWithFolder(terminalName, folderName)
 	cmd = exec.Command("wlrctl", "toplevel", "focus", "title:"+searchTerm)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
@@ -192,7 +193,7 @@ func TryWlrctl(terminalName string) error {
 }
 
 // TryKdotool uses kdotool for KDE Plasma.
-func TryKdotool(terminalName string) error {
+func TryKdotool(terminalName, folderName string) error {
 	if _, err := exec.LookPath("kdotool"); err != nil {
 		return fmt.Errorf("kdotool not installed")
 	}
@@ -218,7 +219,7 @@ func TryKdotool(terminalName string) error {
 
 // TryXdotool uses xdotool for X11-based desktop environments
 // (XFCE, MATE, Cinnamon, i3, bspwm, and X11 sessions of GNOME/KDE).
-func TryXdotool(terminalName string) error {
+func TryXdotool(terminalName, folderName string) error {
 	if _, err := exec.LookPath("xdotool"); err != nil {
 		return fmt.Errorf("xdotool not installed")
 	}
@@ -231,7 +232,7 @@ func TryXdotool(terminalName string) error {
 
 	if err != nil || outputStr == "" {
 		// Fallback: search by window name
-		searchTerm := GetSearchTerm(terminalName)
+		searchTerm := GetSearchTermWithFolder(terminalName, folderName)
 		searchCmd = exec.Command("xdotool", "search", "--name", searchTerm)
 		output, err = searchCmd.CombinedOutput()
 		outputStr = strings.TrimSpace(string(output))

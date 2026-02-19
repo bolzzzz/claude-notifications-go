@@ -34,8 +34,9 @@ func NewClient() (*Client, error) {
 	return &Client{socketPath: socketPath}, nil
 }
 
-// SendNotification sends a notification request to the daemon
-func (c *Client) SendNotification(title, body, focusTarget string, timeout int) (*NotifyResponse, error) {
+// SendNotification sends a notification request to the daemon.
+// focusFolder is the project folder name for window-specific focus (may be empty).
+func (c *Client) SendNotification(title, body, focusTarget, focusFolder string, timeout int) (*NotifyResponse, error) {
 	req := Request{
 		Type:    MessageTypeNotify,
 		Version: ProtocolVersion,
@@ -43,6 +44,7 @@ func (c *Client) SendNotification(title, body, focusTarget string, timeout int) 
 			Title:       title,
 			Body:        body,
 			FocusTarget: focusTarget,
+			FocusFolder: focusFolder,
 			Timeout:     timeout,
 		},
 	}

@@ -32,7 +32,7 @@ type HookData struct {
 
 // notifierInterface defines the interface for sending desktop notifications
 type notifierInterface interface {
-	SendDesktop(status analyzer.Status, message, sessionID string) error
+	SendDesktop(status analyzer.Status, message, sessionID, cwd string) error
 	Close() error
 }
 
@@ -371,7 +371,7 @@ func (h *Handler) sendNotifications(status analyzer.Status, message, sessionID, 
 
 	// Send desktop notification (check per-status enabled)
 	if h.cfg.IsStatusDesktopEnabled(statusStr) {
-		if err := h.notifierSvc.SendDesktop(status, enhancedMessage, sessionID); err != nil {
+		if err := h.notifierSvc.SendDesktop(status, enhancedMessage, sessionID, cwd); err != nil {
 			errorhandler.HandleError(err, "Failed to send desktop notification")
 		}
 	} else {

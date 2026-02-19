@@ -26,9 +26,10 @@ type Server struct {
 	listener  net.Listener
 	startTime time.Time
 
-	// Focus context mapping: notification ID -> focus target
-	focusCtx   map[uint32]string
-	focusCtxMu sync.RWMutex
+	// Focus context mapping: notification ID -> focus target and folder
+	focusCtx       map[uint32]string
+	focusFolderCtx map[uint32]string
+	focusCtxMu     sync.RWMutex
 
 	// Idle timeout for auto-shutdown
 	idleTimeout  time.Duration
@@ -63,12 +64,13 @@ func NewServer(cfg ServerConfig) (*Server, error) {
 	}
 
 	s := &Server{
-		conn:         conn,
-		startTime:    time.Now(),
-		focusCtx:     make(map[uint32]string),
-		idleTimeout:  cfg.IdleTimeout,
-		lastActivity: time.Now(),
-		done:         make(chan struct{}),
+		conn:           conn,
+		startTime:      time.Now(),
+		focusCtx:       make(map[uint32]string),
+		focusFolderCtx: make(map[uint32]string),
+		idleTimeout:    cfg.IdleTimeout,
+		lastActivity:   time.Now(),
+		done:           make(chan struct{}),
 	}
 
 	// Create notifier with action callback
@@ -268,9 +270,10 @@ func (s *Server) handleNotification(req *NotifyRequest) (*NotifyResponse, error)
 	// Store focus context
 	s.focusCtxMu.Lock()
 	s.focusCtx[id] = focusTarget
+	s.focusFolderCtx[id] = req.FocusFolder
 	s.focusCtxMu.Unlock()
 
-	log.Printf("[INFO] Notification sent: ID=%d, focus_target=%s", id, focusTarget)
+	log.Printf("[INFO] Notification sent: ID=%d, focus_target=%s, focus_folder=%s", id, focusTarget, req.FocusFolder)
 
 	return &NotifyResponse{
 		Success:        true,
@@ -289,6 +292,7 @@ func (s *Server) onActionInvoked(sig *notify.ActionInvokedSignal) {
 	// Get focus target
 	s.focusCtxMu.RLock()
 	focusTarget, exists := s.focusCtx[sig.ID]
+	focusFolder := s.focusFolderCtx[sig.ID]
 	s.focusCtxMu.RUnlock()
 
 	if !exists {
@@ -297,8 +301,8 @@ func (s *Server) onActionInvoked(sig *notify.ActionInvokedSignal) {
 	}
 
 	// Attempt to focus
-	log.Printf("[INFO] Attempting to focus: %s", focusTarget)
-	if err := TryFocus(focusTarget); err != nil {
+	log.Printf("[INFO] Attempting to focus: %s (folder: %s)", focusTarget, focusFolder)
+	if err := TryFocus(focusTarget, focusFolder); err != nil {
 		log.Printf("[ERROR] Focus failed: %v", err)
 	} else {
 		log.Printf("[INFO] Focus succeeded")
@@ -307,6 +311,7 @@ func (s *Server) onActionInvoked(sig *notify.ActionInvokedSignal) {
 	// Clean up focus context
 	s.focusCtxMu.Lock()
 	delete(s.focusCtx, sig.ID)
+	delete(s.focusFolderCtx, sig.ID)
 	s.focusCtxMu.Unlock()
 }
 
@@ -315,6 +320,7 @@ func (s *Server) onNotificationClosed(sig *notify.NotificationClosedSignal) {
 	// Clean up focus context
 	s.focusCtxMu.Lock()
 	delete(s.focusCtx, sig.ID)
+	delete(s.focusFolderCtx, sig.ID)
 	s.focusCtxMu.Unlock()
 }
 
