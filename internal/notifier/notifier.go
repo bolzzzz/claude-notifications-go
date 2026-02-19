@@ -267,7 +267,7 @@ func buildAppleScriptFocusScript(bundleID, folderName string) string {
 
 // sanitizeForAppleScript escapes or removes characters that would break AppleScript
 // string literals or shell single-quote delimiters when embedded in a -execute command.
-// Single quotes are escaped using the shell '\'' technique; double quotes and backslashes
+// Single quotes are escaped using the shell '\” technique; double quotes and backslashes
 // are stripped (rare in macOS folder names; double-quoting AppleScript strings doesn't
 // support "" escaping without restructuring the script).
 func sanitizeForAppleScript(s string) string {

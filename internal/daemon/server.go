@@ -69,12 +69,12 @@ func NewServer(cfg ServerConfig) (*Server, error) {
 	}
 
 	s := &Server{
-		conn:           conn,
-		startTime:      time.Now(),
-		focusCtx: make(map[uint32]focusInfo),
-		idleTimeout:    cfg.IdleTimeout,
-		lastActivity:   time.Now(),
-		done:           make(chan struct{}),
+		conn:         conn,
+		startTime:    time.Now(),
+		focusCtx:     make(map[uint32]focusInfo),
+		idleTimeout:  cfg.IdleTimeout,
+		lastActivity: time.Now(),
+		done:         make(chan struct{}),
 	}
 
 	// Create notifier with action callback
