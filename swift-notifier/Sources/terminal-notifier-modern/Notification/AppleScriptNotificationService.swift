@@ -13,7 +13,14 @@ final class OsascriptNotificationService: NotificationSending {
             .replacingOccurrences(of: "\\", with: "\\\\")
             .replacingOccurrences(of: "\"", with: "\\\"")
 
-        let source = "display notification \"\(escapedMessage)\" with title \"\(escapedTitle)\""
+        var source = "display notification \"\(escapedMessage)\" with title \"\(escapedTitle)\""
+
+        if let subtitle = config.subtitle {
+            let escapedSubtitle = subtitle
+                .replacingOccurrences(of: "\\", with: "\\\\")
+                .replacingOccurrences(of: "\"", with: "\\\"")
+            source += " subtitle \"\(escapedSubtitle)\""
+        }
 
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")

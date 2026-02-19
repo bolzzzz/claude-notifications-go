@@ -34,8 +34,22 @@ final class UNNotificationService: NotificationSending {
         let content = UNMutableNotificationContent()
         content.title = config.title
         content.body = config.message
-        content.sound = .default
+        content.sound = config.silent ? nil : .default
         content.categoryIdentifier = "CLAUDE_NOTIFICATION"
+
+        if let subtitle = config.subtitle {
+            content.subtitle = subtitle
+        }
+
+        if let threadID = config.threadID {
+            content.threadIdentifier = threadID
+        }
+
+        if #available(macOS 12.0, *) {
+            if config.timeSensitive {
+                content.interruptionLevel = .timeSensitive
+            }
+        }
 
         if let actionJSON = config.action.toJSON() {
             content.userInfo["action"] = actionJSON

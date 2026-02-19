@@ -7,26 +7,42 @@ final class NotificationServiceTests: XCTestCase {
         let config = NotificationConfig(
             title: "Test Title",
             message: "Test Message",
+            subtitle: "main · my-project",
             action: .activate(bundleID: "com.apple.Terminal"),
-            group: "test-group"
+            group: "test-group",
+            threadID: "session-123",
+            timeSensitive: true,
+            silent: false
         )
 
         XCTAssertEqual(config.title, "Test Title")
         XCTAssertEqual(config.message, "Test Message")
+        XCTAssertEqual(config.subtitle, "main · my-project")
         XCTAssertEqual(config.action, .activate(bundleID: "com.apple.Terminal"))
         XCTAssertEqual(config.group, "test-group")
+        XCTAssertEqual(config.threadID, "session-123")
+        XCTAssertTrue(config.timeSensitive)
+        XCTAssertFalse(config.silent)
     }
 
     func testNotificationConfigWithNilGroup() {
         let config = NotificationConfig(
             title: "Test",
             message: "Body",
+            subtitle: nil,
             action: .none,
-            group: nil
+            group: nil,
+            threadID: nil,
+            timeSensitive: false,
+            silent: true
         )
 
         XCTAssertNil(config.group)
+        XCTAssertNil(config.subtitle)
+        XCTAssertNil(config.threadID)
         XCTAssertEqual(config.action, .none)
+        XCTAssertFalse(config.timeSensitive)
+        XCTAssertTrue(config.silent)
     }
 
     func testExitCodes() {

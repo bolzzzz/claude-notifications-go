@@ -42,7 +42,7 @@ type notificationCall struct {
 	message string
 }
 
-func (m *mockNotifier) SendDesktop(status analyzer.Status, message string) error {
+func (m *mockNotifier) SendDesktop(status analyzer.Status, message, sessionID string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 

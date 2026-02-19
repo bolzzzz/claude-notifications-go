@@ -19,11 +19,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         didReceive response: UNNotificationResponse,
         withCompletionHandler completionHandler: @escaping () -> Void
     ) {
-        let userInfo = response.notification.request.content.userInfo
-
-        if let actionJSON = userInfo["action"] as? String,
-           let action = ClickAction.fromJSON(actionJSON) {
-            actionExecutor.execute(action)
+        switch response.actionIdentifier {
+        case "DISMISS", UNNotificationDismissActionIdentifier:
+            break
+        case "OPEN", UNNotificationDefaultActionIdentifier:
+            let userInfo = response.notification.request.content.userInfo
+            if let actionJSON = userInfo["action"] as? String,
+               let action = ClickAction.fromJSON(actionJSON) {
+                actionExecutor.execute(action)
+            }
+        default:
+            let userInfo = response.notification.request.content.userInfo
+            if let actionJSON = userInfo["action"] as? String,
+               let action = ClickAction.fromJSON(actionJSON) {
+                actionExecutor.execute(action)
+            }
         }
 
         completionHandler()

@@ -13,8 +13,12 @@ final class ArgumentParserTests: XCTestCase {
 
         XCTAssertEqual(config.title, "Hello")
         XCTAssertEqual(config.message, "World")
+        XCTAssertNil(config.subtitle)
         XCTAssertEqual(config.action, .activate(bundleID: "com.apple.Terminal"))
         XCTAssertEqual(config.group, "test-group")
+        XCTAssertNil(config.threadID)
+        XCTAssertFalse(config.timeSensitive)
+        XCTAssertFalse(config.silent)
     }
 
     func testParseMinimalArgs() throws {
@@ -25,8 +29,12 @@ final class ArgumentParserTests: XCTestCase {
 
         XCTAssertEqual(config.title, "Hello")
         XCTAssertEqual(config.message, "World")
+        XCTAssertNil(config.subtitle)
         XCTAssertEqual(config.action, .none)
         XCTAssertNil(config.group)
+        XCTAssertNil(config.threadID)
+        XCTAssertFalse(config.timeSensitive)
+        XCTAssertFalse(config.silent)
     }
 
     func testParseMissingTitle() {
@@ -114,5 +122,104 @@ final class ArgumentParserTests: XCTestCase {
         ])
 
         XCTAssertEqual(config.group, "claude-notif-1234567890")
+    }
+
+    func testParseSubtitle() throws {
+        let config = try ArgumentParser.parse([
+            "-title", "Completed",
+            "-message", "Task done",
+            "-subtitle", "main · my-project"
+        ])
+
+        XCTAssertEqual(config.subtitle, "main · my-project")
+    }
+
+    func testParseThreadID() throws {
+        let config = try ArgumentParser.parse([
+            "-title", "Test",
+            "-message", "Body",
+            "-threadID", "session-abc-123"
+        ])
+
+        XCTAssertEqual(config.threadID, "session-abc-123")
+    }
+
+    func testParseTimeSensitive() throws {
+        let config = try ArgumentParser.parse([
+            "-title", "API Error",
+            "-message", "Rate limited",
+            "-timeSensitive"
+        ])
+
+        XCTAssertTrue(config.timeSensitive)
+    }
+
+    func testParseTimeSensitiveNotSet() throws {
+        let config = try ArgumentParser.parse([
+            "-title", "Test",
+            "-message", "Body"
+        ])
+
+        XCTAssertFalse(config.timeSensitive)
+    }
+
+    func testParseNosound() throws {
+        let config = try ArgumentParser.parse([
+            "-title", "Test",
+            "-message", "Body",
+            "-nosound"
+        ])
+
+        XCTAssertTrue(config.silent)
+    }
+
+    func testParseAllNewOptions() throws {
+        let config = try ArgumentParser.parse([
+            "-title", "Completed [peak]",
+            "-message", "Created 3 files",
+            "-subtitle", "main · notification_plugin_go",
+            "-activate", "com.mitchellh.ghostty",
+            "-group", "claude-notif-123",
+            "-threadID", "session-xyz",
+            "-timeSensitive",
+            "-nosound"
+        ])
+
+        XCTAssertEqual(config.title, "Completed [peak]")
+        XCTAssertEqual(config.message, "Created 3 files")
+        XCTAssertEqual(config.subtitle, "main · notification_plugin_go")
+        XCTAssertEqual(config.action, .activate(bundleID: "com.mitchellh.ghostty"))
+        XCTAssertEqual(config.group, "claude-notif-123")
+        XCTAssertEqual(config.threadID, "session-xyz")
+        XCTAssertTrue(config.timeSensitive)
+        XCTAssertTrue(config.silent)
+    }
+
+    func testParseMissingSubtitleValue() {
+        XCTAssertThrowsError(try ArgumentParser.parse([
+            "-title", "Test",
+            "-message", "Body",
+            "-subtitle"
+        ])) { error in
+            if case ArgumentParserError.missingValue(let flag) = error {
+                XCTAssertEqual(flag, "-subtitle")
+            } else {
+                XCTFail("Expected missingValue error, got \(error)")
+            }
+        }
+    }
+
+    func testParseMissingThreadIDValue() {
+        XCTAssertThrowsError(try ArgumentParser.parse([
+            "-title", "Test",
+            "-message", "Body",
+            "-threadID"
+        ])) { error in
+            if case ArgumentParserError.missingValue(let flag) = error {
+                XCTAssertEqual(flag, "-threadID")
+            } else {
+                XCTFail("Expected missingValue error, got \(error)")
+            }
+        }
     }
 }

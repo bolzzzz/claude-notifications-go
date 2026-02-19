@@ -10,7 +10,11 @@ final class NSNotificationService: NotificationSending {
         let notification = NSUserNotification()
         notification.title = config.title
         notification.informativeText = config.message
-        notification.soundName = NSUserNotificationDefaultSoundName
+        notification.soundName = config.silent ? nil : NSUserNotificationDefaultSoundName
+
+        if let subtitle = config.subtitle {
+            notification.subtitle = subtitle
+        }
 
         if let actionJSON = config.action.toJSON() {
             notification.userInfo = ["action": actionJSON]

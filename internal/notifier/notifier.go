@@ -36,10 +36,20 @@ func New(cfg *config.Config) *Notifier {
 	}
 }
 
+// isTimeSensitiveStatus returns true for statuses that should break through Focus Mode
+func isTimeSensitiveStatus(status analyzer.Status) bool {
+	switch status {
+	case analyzer.StatusAPIError, analyzer.StatusAPIErrorOverloaded, analyzer.StatusSessionLimitReached:
+		return true
+	default:
+		return false
+	}
+}
+
 // SendDesktop sends a desktop notification using beeep (cross-platform)
 // On macOS with clickToFocus enabled, uses terminal-notifier for click-to-focus support
 // On Linux with clickToFocus enabled, uses background daemon for click-to-focus support
-func (n *Notifier) SendDesktop(status analyzer.Status, message string) error {
+func (n *Notifier) SendDesktop(status analyzer.Status, message, sessionID string) error {
 	// Send terminal bell for terminal tab indicators (e.g. Ghostty, tmux)
 	if n.cfg.IsTerminalBellEnabled() {
 		sendTerminalBell()
@@ -55,20 +65,31 @@ func (n *Notifier) SendDesktop(status analyzer.Status, message string) error {
 		return fmt.Errorf("unknown status: %s", status)
 	}
 
-	// Extract session name and git branch from message
-	// Format: "[session-name|branch] actual message" or "[session-name] actual message"
+	// Extract session name, git branch and folder name from message
+	// Format: "[session-name|branch folder] actual message" or "[session-name folder] actual message"
 	sessionName, gitBranch, cleanMessage := extractSessionInfo(message)
 
-	// Build proper title with git branch and session name
-	// Format: "✅ Completed main [peak]" or "✅ Completed [peak]"
+	// Build clean title (status only + session name)
+	// Format: "✅ Completed [peak]" or "✅ Completed"
 	title := statusInfo.Title
 	if sessionName != "" {
-		if gitBranch != "" {
-			title = fmt.Sprintf("%s %s [%s]", title, gitBranch, sessionName)
+		title = fmt.Sprintf("%s [%s]", title, sessionName)
+	}
+
+	// Build subtitle from branch and folder name
+	// Format: "main · notification_plugin_go" or just folder name
+	var subtitle string
+	if gitBranch != "" {
+		// gitBranch may contain "branch folder" (space-separated from hooks.go format)
+		parts := strings.SplitN(gitBranch, " ", 2)
+		if len(parts) == 2 {
+			subtitle = fmt.Sprintf("%s \u00B7 %s", parts[0], parts[1])
 		} else {
-			title = fmt.Sprintf("%s [%s]", title, sessionName)
+			subtitle = gitBranch
 		}
 	}
+
+	timeSensitive := isTimeSensitiveStatus(status)
 
 	// Get app icon path if configured
 	appIcon := n.cfg.Notifications.Desktop.AppIcon
@@ -80,7 +101,7 @@ func (n *Notifier) SendDesktop(status analyzer.Status, message string) error {
 	// macOS: Try terminal-notifier for click-to-focus support
 	if platform.IsMacOS() && n.cfg.Notifications.Desktop.ClickToFocus {
 		if IsTerminalNotifierAvailable() {
-			if err := n.sendWithTerminalNotifier(title, cleanMessage); err != nil {
+			if err := n.sendWithTerminalNotifier(title, cleanMessage, subtitle, sessionID, timeSensitive); err != nil {
 				logging.Warn("terminal-notifier failed, falling back to beeep: %v", err)
 				// Fall through to beeep
 			} else {
@@ -111,7 +132,7 @@ func (n *Notifier) SendDesktop(status analyzer.Status, message string) error {
 
 // sendWithTerminalNotifier sends notification via terminal-notifier on macOS
 // with click-to-focus support (clicking notification activates the terminal)
-func (n *Notifier) sendWithTerminalNotifier(title, message string) error {
+func (n *Notifier) sendWithTerminalNotifier(title, message, subtitle, sessionID string, timeSensitive bool) error {
 	notifierPath, err := GetTerminalNotifierPath()
 	if err != nil {
 		return fmt.Errorf("terminal-notifier not found: %w", err)
@@ -131,6 +152,19 @@ func (n *Notifier) sendWithTerminalNotifier(title, message string) error {
 	} else {
 		args = buildTerminalNotifierArgs(title, message, bundleID)
 	}
+
+	// Append shared options: subtitle, threadID, timeSensitive, nosound
+	if subtitle != "" {
+		args = append(args, "-subtitle", subtitle)
+	}
+	if sessionID != "" {
+		args = append(args, "-threadID", sessionID)
+	}
+	if timeSensitive {
+		args = append(args, "-timeSensitive")
+	}
+	// Always suppress sound in Swift — Go manages sound via audio player
+	args = append(args, "-nosound")
 
 	cmd := exec.Command(notifierPath, args...)
 

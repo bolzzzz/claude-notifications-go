@@ -3,8 +3,12 @@ import Foundation
 struct NotificationConfig {
     let title: String
     let message: String
+    let subtitle: String?
     let action: ClickAction
     let group: String?
+    let threadID: String?
+    let timeSensitive: Bool
+    let silent: Bool
 }
 
 enum ArgumentParserError: Error, CustomStringConvertible {
@@ -29,9 +33,13 @@ enum ArgumentParser {
     static func parse(_ arguments: [String]) throws -> NotificationConfig {
         var title: String?
         var message: String?
+        var subtitle: String?
         var activate: String?
         var execute: String?
         var group: String?
+        var threadID: String?
+        var timeSensitive = false
+        var silent = false
 
         var i = 0
         while i < arguments.count {
@@ -51,6 +59,13 @@ enum ArgumentParser {
                 }
                 i += 1
                 message = arguments[i]
+
+            case "-subtitle":
+                guard i + 1 < arguments.count else {
+                    throw ArgumentParserError.missingValue("-subtitle")
+                }
+                i += 1
+                subtitle = arguments[i]
 
             case "-activate":
                 guard i + 1 < arguments.count else {
@@ -72,6 +87,19 @@ enum ArgumentParser {
                 }
                 i += 1
                 group = arguments[i]
+
+            case "-threadID":
+                guard i + 1 < arguments.count else {
+                    throw ArgumentParserError.missingValue("-threadID")
+                }
+                i += 1
+                threadID = arguments[i]
+
+            case "-timeSensitive":
+                timeSensitive = true
+
+            case "-nosound":
+                silent = true
 
             default:
                 break
@@ -102,8 +130,12 @@ enum ArgumentParser {
         return NotificationConfig(
             title: titleValue,
             message: messageValue,
+            subtitle: subtitle,
             action: action,
-            group: group
+            group: group,
+            threadID: threadID,
+            timeSensitive: timeSensitive,
+            silent: silent
         )
     }
 

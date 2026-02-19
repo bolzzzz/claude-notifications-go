@@ -5,13 +5,17 @@ import UserNotifications
 let arguments = Array(CommandLine.arguments.dropFirst())
 
 if arguments.contains("-help") || arguments.contains("--help") {
-    print("Usage: terminal-notifier-modern -title <title> -message <message> [-activate <bundleID>] [-execute <command>] [-group <id>]")
+    print("Usage: terminal-notifier-modern -title <title> -message <message> [options]")
     print("")
-    print("  -title     Notification title (required)")
-    print("  -message   Notification body (required)")
-    print("  -activate  Bundle ID of app to activate on click")
-    print("  -execute   Shell command to run on click")
-    print("  -group     Group ID (replaces notifications with same group)")
+    print("  -title          Notification title (required)")
+    print("  -message        Notification body (required)")
+    print("  -subtitle       Notification subtitle (e.g. branch and folder)")
+    print("  -activate       Bundle ID of app to activate on click")
+    print("  -execute        Shell command to run on click")
+    print("  -group          Group ID (replaces notifications with same group)")
+    print("  -threadID       Thread ID for grouping notifications in a stack")
+    print("  -timeSensitive  Mark as time-sensitive (breaks through Focus Mode)")
+    print("  -nosound        Suppress notification sound")
     exit(ExitCode.success)
 } else if ArgumentParser.isSendMode(arguments) {
     runSendMode(arguments: arguments)
@@ -32,6 +36,9 @@ func runSendMode(arguments: [String]) {
 
     let app = NSApplication.shared
     app.setActivationPolicy(.accessory)
+
+    // Register notification category with actions before sending
+    NotificationCategory.register()
 
     // Schedule all async work on the main queue — no data races
     DispatchQueue.main.async {
