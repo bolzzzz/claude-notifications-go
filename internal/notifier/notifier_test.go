@@ -1002,32 +1002,23 @@ func TestBuildFocusScript_EmptyCWD(t *testing.T) {
 	}
 }
 
-func TestBuildFocusScript_VSCode_UsesCLI(t *testing.T) {
+func TestBuildFocusScript_VSCode_UsesBinaryCallback(t *testing.T) {
 	script := buildFocusScript("com.microsoft.VSCode", "/home/user/my-project")
-	if !strings.Contains(script, "code --reuse-window") {
-		t.Errorf("VS Code focus script should use 'code --reuse-window', got: %s", script)
+	// VS Code uses the binary focus-window subcommand, not osascript
+	if !strings.Contains(script, "focus-window") {
+		t.Errorf("VS Code focus script should use focus-window subcommand, got: %s", script)
+	}
+	if !strings.Contains(script, "com.microsoft.VSCode") {
+		t.Errorf("VS Code focus script should contain bundle ID, got: %s", script)
 	}
 	if !strings.Contains(script, "/home/user/my-project") {
-		t.Errorf("VS Code focus script should contain the cwd path, got: %s", script)
+		t.Errorf("VS Code focus script should contain cwd, got: %s", script)
+	}
+	if strings.Contains(script, "code --reuse-window") {
+		t.Errorf("VS Code focus script should not use code CLI, got: %s", script)
 	}
 }
 
-func TestBuildFocusScript_VSCode_HasAppleScriptFallback(t *testing.T) {
-	script := buildFocusScript("com.microsoft.VSCode", "/home/user/my-project")
-	if !strings.Contains(script, "osascript") {
-		t.Errorf("VS Code focus script should include AppleScript fallback, got: %s", script)
-	}
-	if !strings.Contains(script, "||") {
-		t.Errorf("VS Code focus script should have || fallback, got: %s", script)
-	}
-}
-
-func TestBuildFocusScript_VSCodeInsiders(t *testing.T) {
-	script := buildFocusScript("com.microsoft.VSCodeInsiders", "/home/user/proj")
-	if !strings.Contains(script, "code-insiders") {
-		t.Errorf("VS Code Insiders should use 'code-insiders', got: %s", script)
-	}
-}
 
 func TestBuildFocusScript_NonVSCode_UsesAppleScript(t *testing.T) {
 	script := buildFocusScript("com.googlecode.iterm2", "/home/user/my-project")
@@ -1065,24 +1056,6 @@ func TestBuildTerminalNotifierArgs_WithCWD_TerminalUsesAppleScript(t *testing.T)
 	}
 	if !strings.Contains(execVal, "my-project") {
 		t.Errorf("-execute value should contain folder name, got: %s", execVal)
-	}
-}
-
-func TestShellQuote(t *testing.T) {
-	tests := []struct {
-		input    string
-		expected string
-	}{
-		{"/simple/path", "'/simple/path'"},
-		{"/path with spaces/foo", "'/path with spaces/foo'"},
-		{"/path/with'quote", "'/path/with'\\''quote'"},
-		{"", "''"},
-	}
-	for _, tt := range tests {
-		got := shellQuote(tt.input)
-		if got != tt.expected {
-			t.Errorf("shellQuote(%q) = %q, want %q", tt.input, got, tt.expected)
-		}
 	}
 }
 

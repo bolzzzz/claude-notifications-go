@@ -207,42 +207,50 @@ func buildTerminalNotifierArgs(title, message, bundleID, cwd string) []string {
 }
 
 // buildFocusScript returns the shell command for -execute in terminal-notifier.
-// For VS Code: uses the code CLI (handles both folders and workspaces by path),
-// falling back to AppleScript title search then app activation.
-// For other apps: uses AppleScript to search windows by folder name.
+// For VS Code: invokes the binary's focus-window subcommand (CGo AXUIElement).
+// For all other apps: uses AppleScript title search by folder name.
 // Returns "" when cwd is empty or unusable (caller should use -activate instead).
 func buildFocusScript(bundleID, cwd string) string {
 	if cwd == "" {
 		return ""
 	}
 
-	if isVSCodeBundleID(bundleID) {
-		return buildVSCodeFocusScript(bundleID, cwd)
-	}
-
 	folderName := filepath.Base(cwd)
 	if folderName == "" || folderName == "." || folderName == string(filepath.Separator) {
 		return ""
 	}
+
+	if isVSCodeBundleID(bundleID) {
+		// VS Code's AppleScript dictionary doesn't support window enumeration
+		// (-1708), so AppleScript is not a viable fallback. Return "" to use
+		// plain -activate if the binary path is unavailable.
+		return buildVSCodeFocusScript(bundleID, cwd)
+	}
+
 	return buildAppleScriptFocusScript(bundleID, folderName)
 }
 
-// isVSCodeBundleID reports whether bundleID is a VS Code variant.
+// isVSCodeBundleID reports whether bundleID is VS Code.
 func isVSCodeBundleID(bundleID string) bool {
-	return bundleID == "com.microsoft.VSCode" || bundleID == "com.microsoft.VSCodeInsiders"
+	return bundleID == "com.microsoft.VSCode"
 }
 
-// buildVSCodeFocusScript builds the -execute script for VS Code windows.
-// Tries: (1) code CLI --reuse-window by path (handles workspaces),
-// (2) AppleScript title search by folder name, (3) plain app activate.
+// shellQuote wraps s in single quotes, escaping internal single quotes
+// using the '\'' technique (end quote, literal apostrophe, resume quote).
+func shellQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
+}
+
+// buildVSCodeFocusScript builds the -execute script for VS Code.
+// Invokes the binary's focus-window subcommand which activates VS Code,
+// waits for AXWindows to populate, then raises the window matching cwd.
+// Returns "" (causing -activate fallback) if os.Executable() fails.
 func buildVSCodeFocusScript(bundleID, cwd string) string {
-	cliName := "code"
-	if bundleID == "com.microsoft.VSCodeInsiders" {
-		cliName = "code-insiders"
+	exe, err := os.Executable()
+	if err != nil {
+		return ""
 	}
-	folderName := sanitizeForAppleScript(filepath.Base(cwd))
-	appleScript := buildAppleScriptFocusScript(bundleID, folderName)
-	return fmt.Sprintf("%s --reuse-window %s 2>/dev/null || %s", cliName, shellQuote(cwd), appleScript)
+	return shellQuote(exe) + " focus-window " + shellQuote(bundleID) + " " + shellQuote(cwd)
 }
 
 // buildAppleScriptFocusScript builds the -execute script that activates an app
@@ -266,12 +274,6 @@ func sanitizeForAppleScript(s string) string {
 		}
 	}
 	return b.String()
-}
-
-// shellQuote wraps s in single quotes with internal single quotes escaped,
-// producing a string safe for embedding in a POSIX shell command.
-func shellQuote(s string) string {
-	return "'" + strings.ReplaceAll(s, "'", "'\\''") + "'"
 }
 
 // sendWithBeeep sends notification via beeep (cross-platform)
