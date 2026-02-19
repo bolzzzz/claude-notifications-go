@@ -236,7 +236,7 @@ func isVSCodeBundleID(bundleID string) bool {
 }
 
 // shellQuote wraps s in single quotes, escaping internal single quotes
-// using the '\'' technique (end quote, literal apostrophe, resume quote).
+// using the '\” technique (end quote, literal apostrophe, resume quote).
 func shellQuote(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }

@@ -1019,7 +1019,6 @@ func TestBuildFocusScript_VSCode_UsesBinaryCallback(t *testing.T) {
 	}
 }
 
-
 func TestBuildFocusScript_NonVSCode_UsesAppleScript(t *testing.T) {
 	script := buildFocusScript("com.googlecode.iterm2", "/home/user/my-project")
 	if !strings.Contains(script, "osascript") {
