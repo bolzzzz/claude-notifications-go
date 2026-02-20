@@ -255,29 +255,35 @@ func buildVSCodeFocusScript(bundleID, cwd string) string {
 }
 
 // buildAppleScriptFocusScript builds the -execute script that activates an app
-// and raises the first window whose title contains folderName.
+// and raises the first window whose title contains folderName as a distinct
+// component (delimited by " — " or " - ", or exact match). This avoids false
+// matches like "app" matching "my-app".
 func buildAppleScriptFocusScript(bundleID, folderName string) string {
 	safeBundleID := sanitizeForAppleScript(bundleID)
 	safeFolder := sanitizeForAppleScript(folderName)
+	// AppleScript: check if name contains " — folder" or "folder — " or equals folder.
+	// This matches titles like "file — folder — App" without substring false positives.
 	return fmt.Sprintf(
-		"osascript -e 'tell application id \"%s\"' -e 'activate' -e 'set _n to \"%s\"' -e 'repeat with w in windows' -e 'if name of w contains _n then' -e 'set index of w to 1' -e 'exit repeat' -e 'end if' -e 'end repeat' -e 'end tell'",
+		`osascript -e 'tell application id "%s"' -e 'activate' -e 'set _n to "%s"' -e 'set _d1 to " \u2014 " & _n' -e 'set _d2 to _n & " \u2014 "' -e 'set _d3 to " - " & _n' -e 'set _d4 to _n & " - "' -e 'repeat with w in windows' -e 'set _t to name of w' -e 'if _t = _n or _t contains _d1 or _t contains _d2 or _t contains _d3 or _t contains _d4 then' -e 'set index of w to 1' -e 'exit repeat' -e 'end if' -e 'end repeat' -e 'end tell'`,
 		safeBundleID, safeFolder,
 	)
 }
 
-// sanitizeForAppleScript escapes or removes characters that would break AppleScript
-// string literals or shell single-quote delimiters when embedded in a -execute command.
-// Single quotes are escaped using the shell '\” technique; double quotes and backslashes
-// are stripped (rare in macOS folder names; double-quoting AppleScript strings doesn't
-// support "" escaping without restructuring the script).
+// sanitizeForAppleScript escapes characters that would break AppleScript string
+// literals or shell single-quote delimiters when embedded in a -execute command.
+// Single quotes are escaped using the shell '\'' technique.
+// Double quotes are escaped as \" for AppleScript string literals.
+// Backslashes are escaped as \\ for AppleScript.
 func sanitizeForAppleScript(s string) string {
 	var b strings.Builder
 	for _, r := range s {
 		switch r {
 		case '\'':
 			b.WriteString(`'\''`)
-		case '"', '\\':
-			// strip
+		case '"':
+			b.WriteString(`\"`)
+		case '\\':
+			b.WriteString(`\\`)
 		default:
 			b.WriteRune(r)
 		}

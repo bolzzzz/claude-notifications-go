@@ -1078,8 +1078,8 @@ func TestSanitizeForAppleScript(t *testing.T) {
 	}{
 		{"normal-project", "normal-project"},
 		{"with'single", `with'\''single`},
-		{`with"double`, "withdouble"},
-		{`with\backslash`, "withbackslash"},
+		{`with"double`, `with\"double`},
+		{`with\backslash`, `with\\backslash`},
 		{"my project", "my project"}, // spaces allowed
 	}
 	for _, tt := range tests {

@@ -41,8 +41,31 @@ static void activateByPID(int pid) {
 	}
 }
 
+// titleMatchesFolder checks if a window title contains folderName as a
+// distinct component. VS Code titles use " \u2014 " (em dash) as separator:
+// "file.go \u2014 my-project \u2014 Visual Studio Code".
+// First tries exact component match (split by " \u2014 "), then falls back
+// to substring containsString for non-VS Code apps.
+static BOOL titleMatchesFolder(NSString *title, NSString *folder) {
+	// Try exact component match (VS Code / Electron-style titles)
+	NSArray *components = [title componentsSeparatedByString:@" \u2014 "];
+	for (NSString *comp in components) {
+		NSString *trimmed = [comp stringByTrimmingCharactersInSet:
+			[NSCharacterSet whitespaceCharacterSet]];
+		if ([trimmed isEqualToString:folder]) return YES;
+	}
+	// Also try " - " (regular dash) for other apps
+	components = [title componentsSeparatedByString:@" - "];
+	for (NSString *comp in components) {
+		NSString *trimmed = [comp stringByTrimmingCharactersInSet:
+			[NSCharacterSet whitespaceCharacterSet]];
+		if ([trimmed isEqualToString:folder]) return YES;
+	}
+	return NO;
+}
+
 // findWindowID returns the CGWindowID of the first window owned by pid whose
-// name contains folderName, searching across all Spaces.
+// title contains folderName as a distinct component, searching across all Spaces.
 // Requires Screen Recording permission; caller must check CGPreflightScreenCaptureAccess first.
 static CGWindowID findWindowID(int pid, const char *folderName, CGRect *outBounds) {
 	@autoreleasepool {
@@ -60,7 +83,7 @@ static CGWindowID findWindowID(int pid, const char *folderName, CGRect *outBound
 			NSNumber *pidNum = info[(__bridge NSString *)kCGWindowOwnerPID];
 			if (!pidNum || pidNum.intValue != pid) continue;
 			NSString *name = info[(__bridge NSString *)kCGWindowName];
-			if (!name || ![name containsString:folder]) continue;
+			if (!name || !titleMatchesFolder(name, folder)) continue;
 			NSNumber *wid = info[(__bridge NSString *)kCGWindowNumber];
 			if (!wid) continue;
 			targetWID = (CGWindowID)wid.unsignedIntValue;
@@ -125,16 +148,16 @@ static int raiseWindowByTitle(int pid, const char *folderName) {
 	CFIndex count = CFArrayGetCount(windows);
 	int found = 0;
 
+	NSString *folder = [NSString stringWithUTF8String:folderName];
 	for (CFIndex i = 0; i < count; i++) {
 		AXUIElementRef w = (AXUIElementRef)CFArrayGetValueAtIndex(windows, i);
 		CFTypeRef titleRef = NULL;
 		if (AXUIElementCopyAttributeValue(w, CFSTR("AXTitle"), &titleRef) != kAXErrorSuccess) continue;
 
-		char buf[2048] = {0};
-		CFStringGetCString((CFStringRef)titleRef, buf, sizeof(buf), kCFStringEncodingUTF8);
+		NSString *title = (__bridge NSString *)titleRef;
+		BOOL matched = titleMatchesFolder(title, folder);
 		CFRelease(titleRef);
-
-		if (strstr(buf, folderName) != NULL) {
+		if (matched) {
 			AXUIElementPerformAction(w, CFSTR("AXRaise"));
 			AXUIElementSetAttributeValue(appEl, CFSTR("AXFrontmost"), kCFBooleanTrue);
 			found = 1;
