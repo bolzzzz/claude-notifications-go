@@ -167,13 +167,8 @@ func generatePlanSummary(messages []jsonl.Message, cfg *config.Config) string {
 // generateReviewSummary generates summary for review_complete status
 // Matches bash: lib/summarizer.sh lines 494-521
 func generateReviewSummary(messages []jsonl.Message, cfg *config.Config) string {
-	// TODO: Consider using getRecentAssistantMessages() for consistency
-	// Currently uses direct GetLastAssistantMessages which works for Stop/SubagentStop hooks
-	// but may pick up old messages in edge cases. Low priority since Stop hook always
-	// contains current response. See generateQuestionSummary for reference implementation.
-
-	// Look for review-related messages
-	recentMessages := jsonl.GetLastAssistantMessages(messages, ReviewMessagesWindow)
+	// Look for review-related messages from current response only
+	recentMessages := getRecentAssistantMessages(messages, ReviewMessagesWindow)
 	texts := jsonl.ExtractTextFromMessages(recentMessages)
 	combined := strings.Join(texts, " ")
 
@@ -214,13 +209,8 @@ func generateReviewSummary(messages []jsonl.Message, cfg *config.Config) string 
 // generateTaskSummary generates summary for task_complete status
 // Matches bash: lib/summarizer.sh lines 523-653
 func generateTaskSummary(messages []jsonl.Message, cfg *config.Config) string {
-	// TODO: Consider using getRecentAssistantMessages() for consistency
-	// Currently uses direct GetLastAssistantMessages which works for Stop/SubagentStop hooks
-	// but may pick up old messages in edge cases. Low priority since Stop hook always
-	// contains current response. See generateQuestionSummary for reference implementation.
-
-	// Get recent assistant messages
-	recentMessages := jsonl.GetLastAssistantMessages(messages, TaskMessagesWindow)
+	// Get recent assistant messages from current response only
+	recentMessages := getRecentAssistantMessages(messages, TaskMessagesWindow)
 	if len(recentMessages) == 0 {
 		return GetDefaultMessage(analyzer.StatusTaskComplete, cfg)
 	}
@@ -254,8 +244,12 @@ func generateTaskSummary(messages []jsonl.Message, cfg *config.Config) string {
 		}
 
 		if actions != "" {
-			// Combine message with actions
-			combined := messageText + ". " + actions
+			// Combine message with actions, avoiding double punctuation
+			separator := ". "
+			if strings.HasSuffix(messageText, ".") || strings.HasSuffix(messageText, "!") || strings.HasSuffix(messageText, "?") {
+				separator = " "
+			}
+			combined := messageText + separator + actions
 			return truncateText(combined, 150)
 		}
 		return truncateText(messageText, 150)
@@ -400,7 +394,7 @@ func formatDuration(d time.Duration) string {
 	seconds := int(d.Seconds())
 
 	if seconds < 60 {
-		return fmt.Sprintf("Took %ds", seconds)
+		return fmt.Sprintf("⏱ %ds", seconds)
 	}
 
 	minutes := seconds / 60
@@ -408,18 +402,18 @@ func formatDuration(d time.Duration) string {
 
 	if minutes < 60 {
 		if secs > 0 {
-			return fmt.Sprintf("Took %dm %ds", minutes, secs)
+			return fmt.Sprintf("⏱ %dm %ds", minutes, secs)
 		}
-		return fmt.Sprintf("Took %dm", minutes)
+		return fmt.Sprintf("⏱ %dm", minutes)
 	}
 
 	hours := minutes / 60
 	mins := minutes % 60
 
 	if mins > 0 {
-		return fmt.Sprintf("Took %dh %dm", hours, mins)
+		return fmt.Sprintf("⏱ %dh %dm", hours, mins)
 	}
-	return fmt.Sprintf("Took %dh", hours)
+	return fmt.Sprintf("⏱ %dh", hours)
 }
 
 // countToolsByType counts tools since last user message
@@ -466,29 +460,17 @@ func buildActionsString(toolCounts map[string]int, duration string) string {
 
 	// Write
 	if count := toolCounts["Write"]; count > 0 {
-		noun := "file"
-		if count != 1 {
-			noun = "files"
-		}
-		parts = append(parts, fmt.Sprintf("Created %d %s", count, noun))
+		parts = append(parts, fmt.Sprintf("📝 %d new", count))
 	}
 
 	// Edit
 	if count := toolCounts["Edit"]; count > 0 {
-		noun := "file"
-		if count != 1 {
-			noun = "files"
-		}
-		parts = append(parts, fmt.Sprintf("Edited %d %s", count, noun))
+		parts = append(parts, fmt.Sprintf("✏️ %d edited", count))
 	}
 
 	// Bash
 	if count := toolCounts["Bash"]; count > 0 {
-		noun := "command"
-		if count != 1 {
-			noun = "commands"
-		}
-		parts = append(parts, fmt.Sprintf("Ran %d %s", count, noun))
+		parts = append(parts, fmt.Sprintf("▶ %d cmds", count))
 	}
 
 	// Add duration at the end
@@ -500,7 +482,7 @@ func buildActionsString(toolCounts map[string]int, duration string) string {
 		return ""
 	}
 
-	return strings.Join(parts, ". ")
+	return strings.Join(parts, "  ")
 }
 
 // Helper functions

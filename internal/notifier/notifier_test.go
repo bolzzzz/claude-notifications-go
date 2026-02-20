@@ -23,17 +23,17 @@ func TestExtractSessionInfo(t *testing.T) {
 	}{
 		{
 			name:             "Valid session name with message",
-			message:          "[boldcat] Created 3 files. Edited 2 files. Took 2m 15s",
+			message:          "[boldcat] 📝 3 new  ✏️ 2 edited  ⏱ 2m 15s",
 			expectedSession:  "boldcat",
 			expectedBranch:   "",
-			expectedCleanMsg: "Created 3 files. Edited 2 files. Took 2m 15s",
+			expectedCleanMsg: "📝 3 new  ✏️ 2 edited  ⏱ 2m 15s",
 		},
 		{
 			name:             "Session name with git branch",
-			message:          "[boldcat|main] Created 3 files",
+			message:          "[boldcat|main] 📝 3 new",
 			expectedSession:  "boldcat",
 			expectedBranch:   "main",
-			expectedCleanMsg: "Created 3 files",
+			expectedCleanMsg: "📝 3 new",
 		},
 		{
 			name:             "Session with feature branch",
@@ -583,7 +583,7 @@ func TestBuildTerminalNotifierArgs_SpecialCharacters(t *testing.T) {
 	// Test with special characters in title/message
 	args := buildTerminalNotifierArgs(
 		"Task Complete [session-1]",
-		"Created 3 files. Edited 2 files. Took 2m 15s",
+		"📝 3 new  ✏️ 2 edited  ⏱ 2m 15s",
 		"com.googlecode.iterm2",
 		"",
 	)
@@ -591,7 +591,7 @@ func TestBuildTerminalNotifierArgs_SpecialCharacters(t *testing.T) {
 	if !containsArg(args, "-title", "Task Complete [session-1]") {
 		t.Error("Title with special characters not preserved")
 	}
-	if !containsArg(args, "-message", "Created 3 files. Edited 2 files. Took 2m 15s") {
+	if !containsArg(args, "-message", "📝 3 new  ✏️ 2 edited  ⏱ 2m 15s") {
 		t.Error("Message with special characters not preserved")
 	}
 }

@@ -523,7 +523,7 @@ func TestE2E_FixAndTestWorkflow(t *testing.T) {
 	}
 
 	// Message should mention edits and command
-	if !contains(call.message, "Edited") && !contains(call.message, "Ran") {
+	if !contains(call.message, "edited") && !contains(call.message, "cmds") {
 		t.Logf("INFO: Task message might not include action summary: %s", call.message)
 		// Not critical - implementation may vary
 	}
