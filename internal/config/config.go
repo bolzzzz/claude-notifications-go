@@ -521,12 +521,12 @@ func (c *Config) ShouldSuppressForSubagents() bool {
 	return *c.Notifications.SuppressForSubagents
 }
 
-// ShouldRespectJudgeMode returns true if CLAUDE_HOOK_JUDGE_MODE=true env var should suppress notifications (default: true)
 // IsBenchmarkEnabled returns true if benchmark timing is enabled via config
 func (c *Config) IsBenchmarkEnabled() bool {
 	return c.Debug.Benchmark
 }
 
+// ShouldRespectJudgeMode returns true if CLAUDE_HOOK_JUDGE_MODE=true env var should suppress notifications (default: true)
 func (c *Config) ShouldRespectJudgeMode() bool {
 	if c.Notifications.RespectJudgeMode == nil {
 		return true // Default: respect judge mode
