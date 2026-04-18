@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.38.0] - 2026-04-18
+
+### Added
+- **Per-channel status overrides for desktop and webhook notifications** - each `statuses.<name>` entry can now define `desktop.enabled` and `webhook.enabled` independently, so you can disable webhook delivery for specific statuses while keeping desktop notifications on, or do the reverse ([#74](https://github.com/777genius/claude-notifications-go/issues/74))
+
+### Fixed
+- **CI stability for async webhook tests** - relaxed an overly strict `SendAsync` timing assertion under race-enabled CI, removing a macOS false negative without weakening the async behavior guarantee
+
 ## [1.37.0] - 2026-04-15
 
 ### Added
