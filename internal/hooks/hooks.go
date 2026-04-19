@@ -338,7 +338,8 @@ func (h *Handler) HandleHook(hookEvent string, input io.Reader) error {
 
 	// Generate message
 	bench.Start("message.generate")
-	message := h.generateMessage(&hookData, status, parsedMessages)
+	body, actions := h.generateMessage(&hookData, status, parsedMessages)
+	message := joinMessageParts(body, actions)
 	bench.Elapsed("message.generate")
 
 	// Acquire content lock to prevent race between different hooks (Stop vs Notification)
@@ -378,7 +379,7 @@ func (h *Handler) HandleHook(hookEvent string, input io.Reader) error {
 
 	// Send notifications
 	bench.Start("notify.send")
-	h.sendNotifications(status, message, hookData.SessionID, hookData.CWD)
+	h.sendNotifications(status, body, actions, hookData.SessionID, hookData.CWD)
 	bench.Elapsed("notify.send")
 
 	logging.Debug("=== Hook completed: %s ===", hookEvent)
@@ -469,9 +470,9 @@ func (h *Handler) handleTeammateIdle(hookData *HookData) error {
 	}
 
 	status := analyzer.StatusTaskComplete
-	message := fmt.Sprintf("Team %q: all teammates finished work", hookData.TeamName)
+	body := fmt.Sprintf("Team %q: all teammates finished work", hookData.TeamName)
 
-	h.sendNotifications(status, message, hookData.SessionID, hookData.CWD)
+	h.sendNotifications(status, body, "", hookData.SessionID, hookData.CWD)
 
 	logging.Debug("=== Hook completed: TeammateIdle (team notification sent) ===")
 	return nil
@@ -501,42 +502,54 @@ func (h *Handler) handleStopEvent(hookData *HookData) (analyzer.Status, []jsonl.
 	return status, messages, nil
 }
 
-// generateMessage generates a notification message.
+// generateMessage generates a notification body and action summary.
 // If messages are provided (from handleStopEvent), uses them directly to avoid re-reading the transcript.
-func (h *Handler) generateMessage(hookData *HookData, status analyzer.Status, messages []jsonl.Message) string {
+func (h *Handler) generateMessage(hookData *HookData, status analyzer.Status, messages []jsonl.Message) (body, actions string) {
 	// Use pre-parsed messages if available (eliminates ~234ms double I/O)
 	if len(messages) > 0 {
-		msg := summary.GenerateFromMessages(messages, status, h.cfg)
-		if msg != "" {
-			return msg
-		}
+		body, actions = summary.GenerateFromMessagesStructured(messages, status, h.cfg)
 	} else if hookData.TranscriptPath != "" && platform.FileExists(hookData.TranscriptPath) {
 		// Fallback: read transcript from file (for non-Stop hooks)
-		msg := summary.GenerateFromTranscript(hookData.TranscriptPath, status, h.cfg)
-		if msg != "" {
-			return msg
+		if parsed, err := jsonl.ParseFile(hookData.TranscriptPath); err == nil {
+			body, actions = summary.GenerateFromMessagesStructured(parsed, status, h.cfg)
 		}
 	}
 
-	return summary.GenerateSimple(status, h.cfg)
+	if body == "" {
+		body = summary.GenerateSimple(status, h.cfg)
+	}
+	return body, actions
 }
 
-// sendNotifications sends desktop and webhook notifications
-func (h *Handler) sendNotifications(status analyzer.Status, message, sessionID, cwd string) {
+// joinMessageParts mirrors summary.appendActions: joins body and actions with a
+// single space when actions is non-empty.
+func joinMessageParts(body, actions string) string {
+	if actions == "" {
+		return body
+	}
+	return body + " " + actions
+}
+
+// sendNotifications sends desktop and webhook notifications.
+//
+// body is the summary text (no metadata prefix, no action segments).
+// actions is the formatted action summary (e.g. "📝 1 new  ▶ 2 cmds  ⏱ 41s") or "".
+func (h *Handler) sendNotifications(status analyzer.Status, body, actions, sessionID, cwd string) {
 	// Add panic recovery to prevent notification failures from crashing the plugin
 	defer errorhandler.HandlePanic()
 
-	// Add session name, git branch and folder name to message
 	sessionName := sessionname.GenerateSessionLabel(sessionID)
 	gitBranch := platform.GetGitBranch(cwd)
 	folderName := filepath.Base(cwd)
 
+	joined := joinMessageParts(body, actions)
+
 	// Format: "[sessionname|branch folder] message" or "[sessionname folder] message"
 	var enhancedMessage string
 	if gitBranch != "" {
-		enhancedMessage = fmt.Sprintf("[%s|%s %s] %s", sessionName, gitBranch, folderName, message)
+		enhancedMessage = fmt.Sprintf("[%s|%s %s] %s", sessionName, gitBranch, folderName, joined)
 	} else {
-		enhancedMessage = fmt.Sprintf("[%s %s] %s", sessionName, folderName, message)
+		enhancedMessage = fmt.Sprintf("[%s %s] %s", sessionName, folderName, joined)
 	}
 
 	logging.Debug("Session name: %s, git branch: %s, folder: %s", sessionName, gitBranch, folderName)
@@ -556,10 +569,15 @@ func (h *Handler) sendNotifications(status analyzer.Status, message, sessionID, 
 	// Send webhook notification (async, check per-status enabled)
 	if h.cfg.IsStatusWebhookEnabled(statusStr) {
 		h.webhookSvc.SendAsyncWithContext(webhook.SendContext{
-			Status:    status,
-			Message:   enhancedMessage,
-			SessionID: sessionID,
-			CWD:       cwd,
+			Status:        status,
+			Message:       enhancedMessage,
+			SessionID:     sessionID,
+			CWD:           cwd,
+			SessionName:   sessionName,
+			GitBranch:     gitBranch,
+			Folder:        folderName,
+			RawBody:       body,
+			ActionSummary: actions,
 		})
 	} else {
 		logging.Debug("Webhook notification disabled for status: %s", statusStr)

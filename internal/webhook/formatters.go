@@ -2,30 +2,37 @@ package webhook
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/777genius/claude-notifications/internal/analyzer"
 	"github.com/777genius/claude-notifications/internal/config"
+	"github.com/777genius/claude-notifications/internal/logging"
+	"github.com/777genius/claude-notifications/internal/sessionname"
 )
 
-// Formatter interface for different webhook formats
+// Formatter renders a SendContext into a preset-specific webhook payload.
+//
+// Implementations should treat ctx.Message as the pre-joined notification text
+// and use the structured fields (RawBody, ActionSummary, SessionName, Folder,
+// GitBranch) only when the underlying transport benefits from richer layouts.
 type Formatter interface {
-	Format(status analyzer.Status, message, sessionID string, statusInfo config.StatusInfo) (interface{}, error)
+	Format(ctx SendContext, statusInfo config.StatusInfo) (interface{}, error)
 }
 
 // SlackFormatter formats messages for Slack
 type SlackFormatter struct{}
 
-func (f *SlackFormatter) Format(status analyzer.Status, message, sessionID string, statusInfo config.StatusInfo) (interface{}, error) {
-	color := getColorForStatus(status)
+func (f *SlackFormatter) Format(ctx SendContext, statusInfo config.StatusInfo) (interface{}, error) {
+	color := getColorForStatus(ctx.Status)
 
 	return map[string]interface{}{
 		"attachments": []map[string]interface{}{
 			{
 				"color":       color,
 				"title":       statusInfo.Title,
-				"text":        message,
-				"footer":      fmt.Sprintf("Session: %s | Claude Notifications", sessionID),
+				"text":        ctx.Message,
+				"footer":      fmt.Sprintf("Session: %s | Claude Notifications", ctx.SessionID),
 				"footer_icon": "https://claude.ai/favicon.ico",
 				"ts":          time.Now().Unix(),
 				"mrkdwn_in":   []string{"text"},
@@ -34,26 +41,141 @@ func (f *SlackFormatter) Format(status analyzer.Status, message, sessionID strin
 	}, nil
 }
 
-// DiscordFormatter formats messages for Discord with embeds
+// DiscordFormatter formats messages for Discord using native embed structure:
+// author / title / description / inline fields / footer.
 type DiscordFormatter struct{}
 
-func (f *DiscordFormatter) Format(status analyzer.Status, message, sessionID string, statusInfo config.StatusInfo) (interface{}, error) {
-	colorInt := getDiscordColorInt(status)
+func (f *DiscordFormatter) Format(ctx SendContext, statusInfo config.StatusInfo) (interface{}, error) {
+	embed := map[string]interface{}{
+		"title":     statusInfo.Title,
+		"color":     getDiscordColorInt(ctx.Status),
+		"timestamp": time.Now().Format(time.RFC3339),
+	}
+
+	if author := buildDiscordAuthor(ctx); author != "" {
+		embed["author"] = map[string]interface{}{"name": author}
+	}
+
+	description := strings.TrimSpace(ctx.RawBody)
+	if description == "" {
+		// Fallback for callers that haven't populated structured fields yet.
+		description = ctx.Message
+	}
+	if description != "" {
+		embed["description"] = description
+	}
+
+	if fields := parseActionSummary(ctx.ActionSummary); len(fields) > 0 {
+		embed["fields"] = fields
+	}
+
+	embed["footer"] = map[string]interface{}{
+		"text": buildDiscordFooter(ctx),
+	}
 
 	return map[string]interface{}{
 		"username": "Claude Code",
-		"embeds": []map[string]interface{}{
-			{
-				"title":       statusInfo.Title,
-				"description": message,
-				"color":       colorInt,
-				"footer": map[string]interface{}{
-					"text": fmt.Sprintf("Session: %s", sessionID),
-				},
-				"timestamp": time.Now().Format(time.RFC3339),
-			},
-		},
+		"embeds":   []map[string]interface{}{embed},
 	}, nil
+}
+
+// buildDiscordAuthor returns the embed author line, e.g.:
+//
+//	"phoenix 439d1884 · claude-utils (main)"
+//	"phoenix 439d1884 · claude-utils"      // no git branch
+//	"phoenix 439d1884"                      // no folder either
+//
+// Returns "" when no session-derived label is available.
+func buildDiscordAuthor(ctx SendContext) string {
+	name := ctx.SessionName
+	if name == "" && ctx.SessionID != "" {
+		name = sessionname.GenerateSessionLabel(ctx.SessionID)
+	}
+	if name == "" {
+		return ""
+	}
+
+	parts := []string{name}
+	if ctx.Folder != "" {
+		parts = append(parts, ctx.Folder)
+	}
+	author := strings.Join(parts, " · ")
+	if ctx.GitBranch != "" {
+		author += fmt.Sprintf(" (%s)", ctx.GitBranch)
+	}
+	return author
+}
+
+// buildDiscordFooter returns the embed footer text.
+// Uses the raw session UUID so the footer is not redundant with the friendly
+// label that already appears in the author line.
+func buildDiscordFooter(ctx SendContext) string {
+	if ctx.SessionID == "" {
+		return "Claude Code"
+	}
+	return fmt.Sprintf("Session: %s · Claude Code", ctx.SessionID)
+}
+
+// actionEmojiField maps the leading emoji of an action segment to a field name.
+// Keep in sync with summary.buildActionsString.
+var actionEmojiField = []struct {
+	prefix string
+	name   string
+}{
+	{"📝", "New"},
+	{"✏️", "Edited"},
+	{"▶", "Commands"},
+	{"⏱", "Duration"},
+}
+
+// parseActionSummary splits an action summary string (e.g.
+// "📝 1 new  ▶ 2 cmds  ⏱ 41s") into Discord embed fields. Unknown segments are
+// collected into a single "Details" field so future emoji additions never lose
+// information.
+func parseActionSummary(s string) []map[string]interface{} {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return nil
+	}
+
+	segments := strings.Split(s, "  ")
+	fields := make([]map[string]interface{}, 0, len(segments))
+	var unknown []string
+
+	for _, seg := range segments {
+		seg = strings.TrimSpace(seg)
+		if seg == "" {
+			continue
+		}
+
+		matched := false
+		for _, m := range actionEmojiField {
+			if strings.HasPrefix(seg, m.prefix) {
+				value := strings.TrimSpace(strings.TrimPrefix(seg, m.prefix))
+				fields = append(fields, map[string]interface{}{
+					"name":   m.name,
+					"value":  value,
+					"inline": true,
+				})
+				matched = true
+				break
+			}
+		}
+		if !matched {
+			unknown = append(unknown, seg)
+		}
+	}
+
+	if len(unknown) > 0 {
+		logging.Debug("Discord embed: unknown action segments %v", unknown)
+		fields = append(fields, map[string]interface{}{
+			"name":   "Details",
+			"value":  strings.Join(unknown, " "),
+			"inline": true,
+		})
+	}
+
+	return fields
 }
 
 // TelegramFormatter formats messages for Telegram with HTML
@@ -61,11 +183,10 @@ type TelegramFormatter struct {
 	ChatID string
 }
 
-func (f *TelegramFormatter) Format(status analyzer.Status, message, sessionID string, statusInfo config.StatusInfo) (interface{}, error) {
-	// HTML formatting for Telegram
-	emoji := getEmojiForStatus(status)
+func (f *TelegramFormatter) Format(ctx SendContext, statusInfo config.StatusInfo) (interface{}, error) {
+	emoji := getEmojiForStatus(ctx.Status)
 	text := fmt.Sprintf("<b>%s %s</b>\n\n%s\n\n<i>Session: %s</i>",
-		emoji, statusInfo.Title, message, sessionID)
+		emoji, statusInfo.Title, ctx.Message, ctx.SessionID)
 
 	return map[string]interface{}{
 		"chat_id":    f.ChatID,
@@ -125,7 +246,7 @@ func getEmojiForStatus(status analyzer.Status) string {
 // LarkFormatter formats messages for Feishu/Lark with interactive cards
 type LarkFormatter struct{}
 
-func (f *LarkFormatter) Format(status analyzer.Status, message, sessionID string, statusInfo config.StatusInfo) (interface{}, error) {
+func (f *LarkFormatter) Format(ctx SendContext, statusInfo config.StatusInfo) (interface{}, error) {
 	return map[string]interface{}{
 		"msg_type": "interactive",
 		"card": map[string]interface{}{
@@ -137,14 +258,14 @@ func (f *LarkFormatter) Format(status analyzer.Status, message, sessionID string
 					"tag":     "plain_text",
 					"content": statusInfo.Title,
 				},
-				"template": getLarkColorTemplate(status),
+				"template": getLarkColorTemplate(ctx.Status),
 			},
 			"elements": []map[string]interface{}{
 				{
 					"tag": "div",
 					"text": map[string]interface{}{
 						"tag":     "plain_text",
-						"content": message,
+						"content": ctx.Message,
 					},
 				},
 				{
@@ -154,7 +275,7 @@ func (f *LarkFormatter) Format(status analyzer.Status, message, sessionID string
 					"tag": "div",
 					"text": map[string]interface{}{
 						"tag":     "plain_text",
-						"content": fmt.Sprintf("Session: %s", sessionID),
+						"content": fmt.Sprintf("Session: %s", ctx.SessionID),
 					},
 				},
 			},

@@ -59,29 +59,47 @@ func getRecentAssistantMessages(messages []jsonl.Message, limit int) []jsonl.Mes
 
 // GenerateFromMessages generates a status-specific summary from already-parsed messages.
 // This avoids re-reading the transcript file when messages are already available.
+//
+// Returns the joined "<body> <actions>" string for backward compatibility. New
+// callers that want body and actions separately should use GenerateFromMessagesStructured.
 func GenerateFromMessages(messages []jsonl.Message, status analyzer.Status, cfg *config.Config) string {
+	body, actions := GenerateFromMessagesStructured(messages, status, cfg)
+	return appendActions(body, actions)
+}
+
+// GenerateFromMessagesStructured returns the summary body and the action summary
+// (e.g. "📝 1 new  ▶ 2 cmds  ⏱ 41s") as separate strings. Either may be empty.
+//
+// Webhook formatters that render structured layouts (Discord embed fields) use
+// this to avoid re-parsing the joined output.
+func GenerateFromMessagesStructured(messages []jsonl.Message, status analyzer.Status, cfg *config.Config) (body, actions string) {
 	if len(messages) == 0 {
-		return GetDefaultMessage(status, cfg)
+		return GetDefaultMessage(status, cfg), ""
 	}
 
 	switch status {
-	case analyzer.StatusQuestion:
-		return generateQuestionSummary(messages, cfg)
-	case analyzer.StatusPlanReady:
-		return generatePlanSummary(messages, cfg)
-	case analyzer.StatusReviewComplete:
-		return generateReviewSummary(messages, cfg)
-	case analyzer.StatusTaskComplete:
-		return generateTaskSummary(messages, cfg)
-	case analyzer.StatusSessionLimitReached:
-		return generateSessionLimitSummary(messages, cfg)
 	case analyzer.StatusAPIError:
-		return generateAPIErrorSummary(messages, cfg)
+		return generateAPIErrorBody(), ""
 	case analyzer.StatusAPIErrorOverloaded:
-		return generateAPIErrorOverloadedSummary(messages, cfg)
-	default:
-		return generateTaskSummary(messages, cfg)
+		return generateAPIErrorOverloadedBody(messages), ""
 	}
+
+	actions = getActionsString(messages)
+	switch status {
+	case analyzer.StatusQuestion:
+		body = generateQuestionBody(messages)
+	case analyzer.StatusPlanReady:
+		body = generatePlanBody(messages)
+	case analyzer.StatusReviewComplete:
+		body = generateReviewBody(messages)
+	case analyzer.StatusTaskComplete:
+		body = generateTaskBody(messages, cfg)
+	case analyzer.StatusSessionLimitReached:
+		body = "Session limit reached. Please start a new conversation."
+	default:
+		body = generateTaskBody(messages, cfg)
+	}
+	return body, actions
 }
 
 // GenerateFromTranscript generates a status-specific summary from transcript
@@ -93,16 +111,13 @@ func GenerateFromTranscript(transcriptPath string, status analyzer.Status, cfg *
 	return GenerateFromMessages(messages, status, cfg)
 }
 
-// generateQuestionSummary generates summary for question status
-// Improved logic: extracts meaningful question text with markdown cleanup
-func generateQuestionSummary(messages []jsonl.Message, cfg *config.Config) string {
-	actions := getActionsString(messages)
-
+// generateQuestionBody generates the body text for question status (no actions appended).
+// Improved logic: extracts meaningful question text with markdown cleanup.
+func generateQuestionBody(messages []jsonl.Message) string {
 	// 1) Try to extract AskUserQuestion tool (with recency check)
 	question, isRecent := extractAskUserQuestion(messages)
 	if question != "" && isRecent {
-		cleaned := CleanMarkdown(question)
-		return appendActions(truncateText(cleaned, 150), actions)
+		return truncateText(CleanMarkdown(question), 150)
 	}
 
 	// 2) Get recent messages from current response using helper
@@ -125,149 +140,112 @@ func generateQuestionSummary(messages []jsonl.Message, cfg *config.Config) strin
 				shortestQuestion = q
 			}
 		}
-		cleaned := CleanMarkdown(shortestQuestion)
-		return appendActions(truncateText(cleaned, 150), actions)
+		return truncateText(CleanMarkdown(shortestQuestion), 150)
 	}
 
 	// Strategy B: No "?" found, take first sentence from last assistant message
 	if len(texts) > 0 {
 		lastText := texts[len(texts)-1]
 		cleaned := CleanMarkdown(lastText)
-		// Extract first sentence
 		firstSentence := extractFirstSentence(cleaned)
 		if len(firstSentence) > 10 {
-			return appendActions(truncateText(firstSentence, 150), actions)
+			return truncateText(firstSentence, 150)
 		}
 	}
 
 	// 3) Final fallback: generic prompt
-	return appendActions("Claude needs your input to continue", actions)
+	return "Claude needs your input to continue"
 }
 
-// generatePlanSummary generates summary for plan_ready status
-// Matches bash: lib/summarizer.sh lines 471-492
-func generatePlanSummary(messages []jsonl.Message, cfg *config.Config) string {
-	// Extract plan from ExitPlanMode tool
+// generatePlanBody generates the body text for plan_ready status (no actions appended).
+// Matches bash: lib/summarizer.sh lines 471-492.
+func generatePlanBody(messages []jsonl.Message) string {
 	plan := extractExitPlanModePlan(messages)
-	actions := getActionsString(messages)
-
 	if plan != "" {
-		// Get first line, clean markdown
-		lines := strings.Split(plan, "\n")
-		firstLine := ""
-		for _, line := range lines {
+		// Get first non-empty line, clean markdown
+		for _, line := range strings.Split(plan, "\n") {
 			cleaned := CleanMarkdown(line)
 			if strings.TrimSpace(cleaned) != "" {
-				firstLine = cleaned
-				break
+				return truncateText(cleaned, 150)
 			}
 		}
-
-		if firstLine != "" {
-			return appendActions(truncateText(firstLine, 150), actions)
-		}
 	}
-
-	return appendActions("Plan is ready for review", actions)
+	return "Plan is ready for review"
 }
 
-// generateReviewSummary generates summary for review_complete status
-// Matches bash: lib/summarizer.sh lines 494-521
-func generateReviewSummary(messages []jsonl.Message, cfg *config.Config) string {
-	actions := getActionsString(messages)
-
-	// Look for review-related messages from current response only
+// generateReviewBody generates the body text for review_complete status (no actions appended).
+// Matches bash: lib/summarizer.sh lines 494-521.
+func generateReviewBody(messages []jsonl.Message) string {
 	recentMessages := getRecentAssistantMessages(messages, ReviewMessagesWindow)
 	texts := jsonl.ExtractTextFromMessages(recentMessages)
 	combined := strings.Join(texts, " ")
 
-	// Check for review keywords
 	reviewKeywords := []string{"review", "анализ", "проверка", "analyzed", "analysis"}
 	for _, keyword := range reviewKeywords {
 		if strings.Contains(strings.ToLower(combined), keyword) {
-			// Find the sentence containing the keyword
 			for _, text := range texts {
 				if strings.Contains(strings.ToLower(text), keyword) {
-					cleaned := CleanMarkdown(text)
-					return appendActions(truncateText(cleaned, 150), actions)
+					return truncateText(CleanMarkdown(text), 150)
 				}
 			}
 		}
 	}
 
 	// Count Read tool usage
-	tools := jsonl.ExtractTools(recentMessages)
 	readCount := 0
-	for _, tool := range tools {
+	for _, tool := range jsonl.ExtractTools(recentMessages) {
 		if tool.Name == "Read" {
 			readCount++
 		}
 	}
-
 	if readCount > 0 {
 		noun := "file"
 		if readCount != 1 {
 			noun = "files"
 		}
-		return appendActions(fmt.Sprintf("Reviewed %d %s", readCount, noun), actions)
+		return fmt.Sprintf("Reviewed %d %s", readCount, noun)
 	}
 
-	return appendActions("Code review completed", actions)
+	return "Code review completed"
 }
 
-// generateTaskSummary generates summary for task_complete status
-// Matches bash: lib/summarizer.sh lines 523-653
-func generateTaskSummary(messages []jsonl.Message, cfg *config.Config) string {
-	// Get recent assistant messages from current response only
+// generateTaskBody generates the body text for task_complete status (no actions appended).
+// Matches bash: lib/summarizer.sh lines 523-653.
+func generateTaskBody(messages []jsonl.Message, cfg *config.Config) string {
 	recentMessages := getRecentAssistantMessages(messages, TaskMessagesWindow)
 	if len(recentMessages) == 0 {
 		return GetDefaultMessage(analyzer.StatusTaskComplete, cfg)
 	}
 
-	// Extract last assistant message text
 	texts := jsonl.ExtractTextFromMessages(recentMessages)
 	var lastMessage string
 	if len(texts) > 0 {
 		lastMessage = texts[len(texts)-1]
 	}
 
-	actions := getActionsString(messages)
-
 	if lastMessage != "" {
 		cleaned := CleanMarkdown(lastMessage)
-
-		var messageText string
-		if len([]rune(cleaned)) < 150 {
-			messageText = cleaned
-		} else {
+		messageText := cleaned
+		if len([]rune(cleaned)) >= 150 {
 			messageText = extractFirstSentence(cleaned)
 		}
-
-		return appendActions(truncateText(messageText, 150), actions)
+		return truncateText(messageText, 150)
 	}
 
-	return appendActions("Task completed successfully", actions)
+	return "Task completed successfully"
 }
 
-// generateSessionLimitSummary generates summary for session_limit_reached status
-func generateSessionLimitSummary(messages []jsonl.Message, cfg *config.Config) string {
-	actions := getActionsString(messages)
-	return appendActions("Session limit reached. Please start a new conversation.", actions)
-}
-
-// generateAPIErrorSummary generates summary for api_error (401 authentication) status
-func generateAPIErrorSummary(messages []jsonl.Message, cfg *config.Config) string {
+// generateAPIErrorBody returns the body text for api_error (401 authentication) status.
+func generateAPIErrorBody() string {
 	return "Please run /login"
 }
 
-// generateAPIErrorOverloadedSummary generates summary for api_error_overloaded status
-// Extracts the actual error text from the API error message
-func generateAPIErrorOverloadedSummary(messages []jsonl.Message, cfg *config.Config) string {
-	// Find the last API error message and extract its text
+// generateAPIErrorOverloadedBody returns the body text for api_error_overloaded status.
+// Extracts the actual error text from the API error message.
+func generateAPIErrorOverloadedBody(messages []jsonl.Message) string {
 	errorMessages := jsonl.GetLastApiErrorMessages(messages, 1)
 	if len(errorMessages) > 0 {
-		texts := jsonl.ExtractTextFromMessages(errorMessages)
-		for _, text := range texts {
+		for _, text := range jsonl.ExtractTextFromMessages(errorMessages) {
 			cleaned := strings.TrimSpace(CleanMarkdown(text))
 			if cleaned != "" {
 				return truncateText(cleaned, 150)

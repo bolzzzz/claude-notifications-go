@@ -9,6 +9,16 @@ import (
 	"github.com/777genius/claude-notifications/internal/config"
 )
 
+// makeCtx builds a SendContext for tests with the legacy fields populated.
+// Tests that exercise structured fields populate them explicitly.
+func makeCtx(status analyzer.Status, message, sessionID string) SendContext {
+	return SendContext{
+		Status:    status,
+		Message:   message,
+		SessionID: sessionID,
+	}
+}
+
 func TestSlackFormatterFormat(t *testing.T) {
 	formatter := &SlackFormatter{}
 	statusInfo := config.StatusInfo{
@@ -16,9 +26,7 @@ func TestSlackFormatterFormat(t *testing.T) {
 	}
 
 	result, err := formatter.Format(
-		analyzer.StatusTaskComplete,
-		"The task has been completed successfully",
-		"session-123",
+		makeCtx(analyzer.StatusTaskComplete, "The task has been completed successfully", "session-123"),
 		statusInfo,
 	)
 
@@ -89,7 +97,7 @@ func TestSlackFormatterColors(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(string(tt.status), func(t *testing.T) {
-			result, err := formatter.Format(tt.status, "test", "session-1", statusInfo)
+			result, err := formatter.Format(makeCtx(tt.status, "test", "session-1"), statusInfo)
 			if err != nil {
 				t.Fatalf("Unexpected error: %v", err)
 			}
@@ -112,9 +120,7 @@ func TestDiscordFormatterFormat(t *testing.T) {
 	}
 
 	result, err := formatter.Format(
-		analyzer.StatusQuestion,
-		"What should we do next?",
-		"session-456",
+		makeCtx(analyzer.StatusQuestion, "What should we do next?", "session-456"),
 		statusInfo,
 	)
 
@@ -170,8 +176,13 @@ func TestDiscordFormatterFormat(t *testing.T) {
 	}
 
 	footerText, ok := footer["text"].(string)
-	if !ok || !strings.Contains(footerText, "session-456") {
-		t.Errorf("Footer text should contain session ID, got %v", footerText)
+	if !ok {
+		t.Fatalf("Footer text missing or wrong type: %T", footer["text"])
+	}
+	// Footer carries the raw session ID so it doesn't duplicate the friendly
+	// label that already appears in the author line.
+	if !strings.Contains(footerText, "session-456") {
+		t.Errorf("Footer text should contain raw session ID, got %q", footerText)
 	}
 
 	// Verify JSON serializable
@@ -200,7 +211,7 @@ func TestDiscordFormatterColors(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(string(tt.status), func(t *testing.T) {
-			result, err := formatter.Format(tt.status, "test", "session-1", statusInfo)
+			result, err := formatter.Format(makeCtx(tt.status, "test", "session-1"), statusInfo)
 			if err != nil {
 				t.Fatalf("Unexpected error: %v", err)
 			}
@@ -223,9 +234,7 @@ func TestTelegramFormatterFormat(t *testing.T) {
 	}
 
 	result, err := formatter.Format(
-		analyzer.StatusReviewComplete,
-		"Code review finished",
-		"session-789",
+		makeCtx(analyzer.StatusReviewComplete, "Code review finished", "session-789"),
 		statusInfo,
 	)
 
@@ -303,7 +312,7 @@ func TestTelegramFormatterEmojis(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(string(tt.status), func(t *testing.T) {
-			result, err := formatter.Format(tt.status, "test", "session-1", statusInfo)
+			result, err := formatter.Format(makeCtx(tt.status, "test", "session-1"), statusInfo)
 			if err != nil {
 				t.Fatalf("Unexpected error: %v", err)
 			}
@@ -391,9 +400,7 @@ func TestLarkFormatterFormat(t *testing.T) {
 	}
 
 	result, err := formatter.Format(
-		analyzer.StatusTaskComplete,
-		"The task has been completed successfully",
-		"session-123",
+		makeCtx(analyzer.StatusTaskComplete, "The task has been completed successfully", "session-123"),
 		statusInfo,
 	)
 
@@ -505,7 +512,7 @@ func TestLarkFormatterColors(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(string(tt.status), func(t *testing.T) {
-			result, err := formatter.Format(tt.status, "test", "session-1", statusInfo)
+			result, err := formatter.Format(makeCtx(tt.status, "test", "session-1"), statusInfo)
 			if err != nil {
 				t.Fatalf("Unexpected error: %v", err)
 			}
@@ -527,9 +534,7 @@ func TestLarkFormatterUnknownStatus(t *testing.T) {
 	statusInfo := config.StatusInfo{Title: "Unknown"}
 
 	result, err := formatter.Format(
-		analyzer.Status("unknown"),
-		"Unknown status",
-		"session-999",
+		makeCtx(analyzer.Status("unknown"), "Unknown status", "session-999"),
 		statusInfo,
 	)
 
@@ -564,6 +569,188 @@ func TestGetLarkColorTemplate(t *testing.T) {
 			result := getLarkColorTemplate(tt.status)
 			if result != tt.expected {
 				t.Errorf("Expected %s, got %s", tt.expected, result)
+			}
+		})
+	}
+}
+
+// === Tests for Discord native embed layout ===
+
+func TestDiscordFormatter_AuthorAndFields(t *testing.T) {
+	formatter := &DiscordFormatter{}
+	statusInfo := config.StatusInfo{Title: "✅ Completed"}
+
+	ctx := SendContext{
+		Status:        analyzer.StatusTaskComplete,
+		Message:       "[phoenix 439d1884|main claude-utils] Done. 📝 1 new  ▶ 2 cmds  ⏱ 41s",
+		SessionID:     "439d1884-b53d-42f2-922a-203d086a158d",
+		CWD:           "/work/claude-utils",
+		SessionName:   "phoenix 439d1884",
+		GitBranch:     "main",
+		Folder:        "claude-utils",
+		RawBody:       "Done.",
+		ActionSummary: "📝 1 new  ▶ 2 cmds  ⏱ 41s",
+	}
+
+	result, err := formatter.Format(ctx, statusInfo)
+	if err != nil {
+		t.Fatalf("Format error: %v", err)
+	}
+
+	embed := result.(map[string]interface{})["embeds"].([]map[string]interface{})[0]
+
+	author, ok := embed["author"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("embed should have author map, got %T", embed["author"])
+	}
+	if name := author["name"].(string); name != "phoenix 439d1884 · claude-utils (main)" {
+		t.Errorf("author.name = %q, want %q", name, "phoenix 439d1884 · claude-utils (main)")
+	}
+
+	if desc := embed["description"].(string); desc != "Done." {
+		t.Errorf("description = %q, want %q", desc, "Done.")
+	}
+
+	fields, ok := embed["fields"].([]map[string]interface{})
+	if !ok {
+		t.Fatalf("embed should have fields slice, got %T", embed["fields"])
+	}
+	if len(fields) != 3 {
+		t.Fatalf("fields count = %d, want 3 (📝/▶/⏱)", len(fields))
+	}
+	if fields[0]["name"] != "New" || fields[0]["value"] != "1 new" {
+		t.Errorf("fields[0] = %v, want New/1 new", fields[0])
+	}
+	if fields[1]["name"] != "Commands" || fields[1]["value"] != "2 cmds" {
+		t.Errorf("fields[1] = %v, want Commands/2 cmds", fields[1])
+	}
+	if fields[2]["name"] != "Duration" || fields[2]["value"] != "41s" {
+		t.Errorf("fields[2] = %v, want Duration/41s", fields[2])
+	}
+	for i, f := range fields {
+		if inline, _ := f["inline"].(bool); !inline {
+			t.Errorf("fields[%d] should be inline", i)
+		}
+	}
+
+	footer := embed["footer"].(map[string]interface{})
+	wantFooter := "Session: 439d1884-b53d-42f2-922a-203d086a158d · Claude Code"
+	if text := footer["text"].(string); text != wantFooter {
+		t.Errorf("footer = %q, want %q", text, wantFooter)
+	}
+
+	if _, err := json.Marshal(result); err != nil {
+		t.Errorf("payload not JSON-serializable: %v", err)
+	}
+}
+
+func TestDiscordFormatter_NoGitBranch(t *testing.T) {
+	formatter := &DiscordFormatter{}
+	ctx := SendContext{
+		Status:      analyzer.StatusTaskComplete,
+		Message:     "Done.",
+		SessionID:   "439d1884-b53d-42f2-922a-203d086a158d",
+		SessionName: "phoenix 439d1884",
+		Folder:      "claude-utils",
+		RawBody:     "Done.",
+	}
+
+	result, err := formatter.Format(ctx, config.StatusInfo{Title: "✅"})
+	if err != nil {
+		t.Fatalf("Format: %v", err)
+	}
+
+	embed := result.(map[string]interface{})["embeds"].([]map[string]interface{})[0]
+	author := embed["author"].(map[string]interface{})
+	if name := author["name"].(string); name != "phoenix 439d1884 · claude-utils" {
+		t.Errorf("author.name = %q, want no branch suffix", name)
+	}
+}
+
+func TestDiscordFormatter_NoActionSummaryOmitsFields(t *testing.T) {
+	formatter := &DiscordFormatter{}
+	ctx := SendContext{
+		Status:      analyzer.StatusQuestion,
+		Message:     "Pick one.",
+		SessionID:   "439d1884-b53d-42f2-922a-203d086a158d",
+		SessionName: "phoenix 439d1884",
+		RawBody:     "Pick one.",
+	}
+
+	result, err := formatter.Format(ctx, config.StatusInfo{Title: "❓"})
+	if err != nil {
+		t.Fatalf("Format: %v", err)
+	}
+
+	embed := result.(map[string]interface{})["embeds"].([]map[string]interface{})[0]
+	if _, present := embed["fields"]; present {
+		t.Errorf("embed should not contain fields key when ActionSummary is empty")
+	}
+}
+
+func TestDiscordFormatter_FallsBackToMessageWhenRawBodyEmpty(t *testing.T) {
+	formatter := &DiscordFormatter{}
+	ctx := SendContext{
+		Status:    analyzer.StatusTaskComplete,
+		Message:   "legacy joined message",
+		SessionID: "439d1884-b53d-42f2-922a-203d086a158d",
+		// SessionName / RawBody intentionally empty (legacy callers).
+	}
+
+	result, err := formatter.Format(ctx, config.StatusInfo{Title: "✅"})
+	if err != nil {
+		t.Fatalf("Format: %v", err)
+	}
+
+	embed := result.(map[string]interface{})["embeds"].([]map[string]interface{})[0]
+	if desc := embed["description"].(string); desc != "legacy joined message" {
+		t.Errorf("description = %q, want fallback to Message", desc)
+	}
+}
+
+func TestParseActionSummary(t *testing.T) {
+	tests := []struct {
+		name string
+		in   string
+		want []map[string]interface{}
+	}{
+		{
+			name: "empty",
+			in:   "",
+			want: nil,
+		},
+		{
+			name: "all known",
+			in:   "📝 1 new  ✏️ 2 edited  ▶ 3 cmds  ⏱ 12s",
+			want: []map[string]interface{}{
+				{"name": "New", "value": "1 new", "inline": true},
+				{"name": "Edited", "value": "2 edited", "inline": true},
+				{"name": "Commands", "value": "3 cmds", "inline": true},
+				{"name": "Duration", "value": "12s", "inline": true},
+			},
+		},
+		{
+			name: "unknown emoji collected",
+			in:   "📝 1 new  🐛 1 bug",
+			want: []map[string]interface{}{
+				{"name": "New", "value": "1 new", "inline": true},
+				{"name": "Details", "value": "🐛 1 bug", "inline": true},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := parseActionSummary(tt.in)
+			if len(got) != len(tt.want) {
+				t.Fatalf("len = %d, want %d (got %v)", len(got), len(tt.want), got)
+			}
+			for i := range got {
+				for k, v := range tt.want[i] {
+					if got[i][k] != v {
+						t.Errorf("field[%d].%s = %v, want %v", i, k, got[i][k], v)
+					}
+				}
 			}
 		})
 	}

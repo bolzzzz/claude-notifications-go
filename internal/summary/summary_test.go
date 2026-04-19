@@ -788,7 +788,7 @@ func TestGenerateAPIErrorSummary(t *testing.T) {
 		},
 	}
 
-	result := generateAPIErrorSummary(messages, cfg)
+	result := GenerateFromMessages(messages, analyzer.StatusAPIError, cfg)
 	expected := "Please run /login"
 	if result != expected {
 		t.Errorf("generateAPIErrorSummary() = %q, want %q", result, expected)
@@ -873,7 +873,7 @@ func TestGenerateQuestionSummary_WithRecentQuestion(t *testing.T) {
 		},
 	}
 
-	result := generateQuestionSummary(messages, cfg)
+	result := GenerateFromMessages(messages, analyzer.StatusQuestion, cfg)
 	if !strings.Contains(result, "Which API should we use") {
 		t.Errorf("generateQuestionSummary() = %q, should contain question", result)
 	}
@@ -894,7 +894,7 @@ func TestGenerateQuestionSummary_WithoutQuestion(t *testing.T) {
 		},
 	}
 
-	result := generateQuestionSummary(messages, cfg)
+	result := GenerateFromMessages(messages, analyzer.StatusQuestion, cfg)
 	// Should either extract text or fallback to default message
 	if result == "" {
 		t.Errorf("generateQuestionSummary() should not be empty")
@@ -929,7 +929,7 @@ func TestGenerateReviewSummary_WithToolsAndDuration(t *testing.T) {
 		},
 	}
 
-	result := generateReviewSummary(messages, cfg)
+	result := GenerateFromMessages(messages, analyzer.StatusReviewComplete, cfg)
 	if result == "" {
 		t.Errorf("generateReviewSummary() should not be empty")
 	}
@@ -954,7 +954,7 @@ func TestGenerateReviewSummary_NoTools(t *testing.T) {
 		},
 	}
 
-	result := generateReviewSummary(messages, cfg)
+	result := GenerateFromMessages(messages, analyzer.StatusReviewComplete, cfg)
 	if !strings.Contains(result, "review") && !strings.Contains(result, "complete") {
 		t.Errorf("generateReviewSummary() should extract meaningful text: %q", result)
 	}
@@ -986,7 +986,7 @@ func TestGenerateTaskSummary_WithMultipleTools(t *testing.T) {
 		},
 	}
 
-	result := generateTaskSummary(messages, cfg)
+	result := GenerateFromMessages(messages, analyzer.StatusTaskComplete, cfg)
 	// Should contain tool counts and duration
 	if !strings.Contains(result, "new") && !strings.Contains(result, "edited") {
 		t.Errorf("generateTaskSummary() should mention tools: %q", result)
@@ -1011,7 +1011,7 @@ func TestGenerateTaskSummary_NoTools(t *testing.T) {
 		},
 	}
 
-	result := generateTaskSummary(messages, cfg)
+	result := GenerateFromMessages(messages, analyzer.StatusTaskComplete, cfg)
 	// Should extract text when no tools
 	if !strings.Contains(result, "Task completed") && !strings.Contains(result, "successfully") {
 		t.Errorf("generateTaskSummary() should extract text: %q", result)
@@ -1062,7 +1062,7 @@ func TestGenerateAPIErrorOverloadedSummary(t *testing.T) {
 			},
 		}
 
-		result := generateAPIErrorOverloadedSummary(messages, cfg)
+		result := GenerateFromMessages(messages, analyzer.StatusAPIErrorOverloaded, cfg)
 		if !strings.Contains(result, "529") {
 			t.Errorf("should contain error code, got: %s", result)
 		}
@@ -1086,7 +1086,7 @@ func TestGenerateAPIErrorOverloadedSummary(t *testing.T) {
 			},
 		}
 
-		result := generateAPIErrorOverloadedSummary(messages, cfg)
+		result := GenerateFromMessages(messages, analyzer.StatusAPIErrorOverloaded, cfg)
 		if !strings.Contains(result, "Connection error") {
 			t.Errorf("should contain 'Connection error', got: %s", result)
 		}
@@ -1105,14 +1105,16 @@ func TestGenerateAPIErrorOverloadedSummary(t *testing.T) {
 			},
 		}
 
-		result := generateAPIErrorOverloadedSummary(messages, cfg)
+		result := GenerateFromMessages(messages, analyzer.StatusAPIErrorOverloaded, cfg)
 		if result != "API error occurred" {
 			t.Errorf("should return fallback, got: %s", result)
 		}
 	})
 
 	t.Run("empty_messages", func(t *testing.T) {
-		result := generateAPIErrorOverloadedSummary([]jsonl.Message{}, cfg)
+		// Empty messages short-circuit to GetDefaultMessage in the public API,
+		// so test the body helper directly here to cover its empty fallback.
+		result := generateAPIErrorOverloadedBody([]jsonl.Message{})
 		if result != "API error occurred" {
 			t.Errorf("should return fallback for empty, got: %s", result)
 		}
@@ -1292,7 +1294,7 @@ func TestGenerateReviewSummary_WithKeywords(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := generateReviewSummary(tt.messages, cfg)
+			result := GenerateFromMessages(tt.messages, analyzer.StatusReviewComplete, cfg)
 			if result == "" {
 				t.Error("generateReviewSummary() returned empty string")
 			}
@@ -1350,7 +1352,7 @@ func TestGenerateReviewSummary_WithReadTools(t *testing.T) {
 				},
 			}
 
-			result := generateReviewSummary(messages, cfg)
+			result := GenerateFromMessages(messages, analyzer.StatusReviewComplete, cfg)
 			if result != tt.expected {
 				t.Errorf("generateReviewSummary() = %q, want %q", result, tt.expected)
 			}
@@ -1375,7 +1377,7 @@ func TestGenerateReviewSummary_Fallback(t *testing.T) {
 		},
 	}
 
-	result := generateReviewSummary(messages, cfg)
+	result := GenerateFromMessages(messages, analyzer.StatusReviewComplete, cfg)
 	if result != "Code review completed" {
 		t.Errorf("generateReviewSummary() fallback = %q, want 'Code review completed'", result)
 	}
@@ -1392,7 +1394,7 @@ func TestGenerateTaskSummary_EmptyMessages(t *testing.T) {
 
 	messages := []jsonl.Message{}
 
-	result := generateTaskSummary(messages, cfg)
+	result := GenerateFromMessages(messages, analyzer.StatusTaskComplete, cfg)
 	if result == "" {
 		t.Error("generateTaskSummary() should return default message for empty messages")
 	}
@@ -1423,7 +1425,7 @@ func TestGenerateTaskSummary_ShortMessage(t *testing.T) {
 		},
 	}
 
-	result := generateTaskSummary(messages, cfg)
+	result := GenerateFromMessages(messages, analyzer.StatusTaskComplete, cfg)
 	if result == "" {
 		t.Error("generateTaskSummary() returned empty string")
 	}
@@ -1470,7 +1472,7 @@ func TestGenerateTaskSummary_NoDuplicatePunctuation(t *testing.T) {
 				},
 			}
 
-			result := generateTaskSummary(messages, cfg)
+			result := GenerateFromMessages(messages, analyzer.StatusTaskComplete, cfg)
 			if strings.Contains(result, "..") {
 				t.Errorf("Double dots in result: %q", result)
 			}
@@ -1511,7 +1513,7 @@ func TestGenerateTaskSummary_LongMessage(t *testing.T) {
 		},
 	}
 
-	result := generateTaskSummary(messages, cfg)
+	result := GenerateFromMessages(messages, analyzer.StatusTaskComplete, cfg)
 	if result == "" {
 		t.Error("generateTaskSummary() returned empty string")
 	}
@@ -1547,7 +1549,7 @@ func TestGenerateTaskSummary_MultibyteThreshold(t *testing.T) {
 		},
 	}
 
-	result := generateTaskSummary(messages, cfg)
+	result := GenerateFromMessages(messages, analyzer.StatusTaskComplete, cfg)
 	// Because it's < 150 runes, it should NOT be passed to extractFirstSentence
 	// and should be returned as-is (possibly truncated by the final truncateText(150))
 	if !strings.Contains(result, multibyteText) {
@@ -1580,7 +1582,7 @@ func TestGenerateTaskSummary_OnlyActions(t *testing.T) {
 		},
 	}
 
-	result := generateTaskSummary(messages, cfg)
+	result := GenerateFromMessages(messages, analyzer.StatusTaskComplete, cfg)
 	if result == "" {
 		t.Error("generateTaskSummary() returned empty string")
 	}
@@ -1605,7 +1607,7 @@ func TestGenerateTaskSummary_FinalFallback(t *testing.T) {
 		},
 	}
 
-	result := generateTaskSummary(messages, cfg)
+	result := GenerateFromMessages(messages, analyzer.StatusTaskComplete, cfg)
 	if result == "" {
 		t.Error("generateTaskSummary() should return fallback message")
 	}
@@ -1654,7 +1656,7 @@ func TestGenerateQuestionSummary_NotRecentAskUserQuestion(t *testing.T) {
 		},
 	}
 
-	result := generateQuestionSummary(messages, cfg)
+	result := GenerateFromMessages(messages, analyzer.StatusQuestion, cfg)
 	if result == "" {
 		t.Error("generateQuestionSummary() returned empty string")
 	}
@@ -1682,7 +1684,7 @@ func TestGenerateQuestionSummary_MultipleQuestions(t *testing.T) {
 		},
 	}
 
-	result := generateQuestionSummary(messages, cfg)
+	result := GenerateFromMessages(messages, analyzer.StatusQuestion, cfg)
 	if result == "" {
 		t.Error("generateQuestionSummary() returned empty string")
 	}
@@ -1708,7 +1710,7 @@ func TestGenerateQuestionSummary_NoQuestionMark(t *testing.T) {
 		},
 	}
 
-	result := generateQuestionSummary(messages, cfg)
+	result := GenerateFromMessages(messages, analyzer.StatusQuestion, cfg)
 	if result == "" {
 		t.Error("generateQuestionSummary() returned empty string")
 	}
@@ -1734,12 +1736,89 @@ func TestGenerateQuestionSummary_VeryShortText(t *testing.T) {
 		},
 	}
 
-	result := generateQuestionSummary(messages, cfg)
+	result := GenerateFromMessages(messages, analyzer.StatusQuestion, cfg)
 	if result == "" {
 		t.Error("generateQuestionSummary() returned empty string")
 	}
 	// Should use fallback for very short text
 	if result != "Claude needs your input to continue" {
 		t.Logf("Result: %q (should use fallback for short text)", result)
+	}
+}
+
+// === Tests for GenerateFromMessagesStructured ===
+
+func TestGenerateFromMessagesStructured_TaskComplete(t *testing.T) {
+	cfg := config.DefaultConfig()
+
+	now := time.Now()
+	messages := []jsonl.Message{
+		{
+			Type:      "user",
+			Timestamp: now.Add(-30 * time.Second).Format(time.RFC3339),
+			Message:   jsonl.MessageContent{Content: []jsonl.Content{{Type: "text", Text: "do it"}}},
+		},
+		{
+			Type:      "assistant",
+			Timestamp: now.Add(-25 * time.Second).Format(time.RFC3339),
+			Message: jsonl.MessageContent{Content: []jsonl.Content{
+				{Type: "tool_use", Name: "Write", Input: map[string]interface{}{}},
+				{Type: "tool_use", Name: "Bash", Input: map[string]interface{}{}},
+			}},
+		},
+		{
+			Type:      "assistant",
+			Timestamp: now.Format(time.RFC3339),
+			Message:   jsonl.MessageContent{Content: []jsonl.Content{{Type: "text", Text: "Done."}}},
+		},
+	}
+
+	body, actions := GenerateFromMessagesStructured(messages, analyzer.StatusTaskComplete, cfg)
+	if body != "Done." {
+		t.Errorf("body = %q, want %q", body, "Done.")
+	}
+	if !strings.Contains(actions, "📝 1 new") {
+		t.Errorf("actions = %q, want to contain 📝 1 new", actions)
+	}
+	if !strings.Contains(actions, "▶ 1 cmds") {
+		t.Errorf("actions = %q, want to contain ▶ 1 cmds", actions)
+	}
+	if !strings.Contains(actions, "⏱") {
+		t.Errorf("actions = %q, want to contain duration", actions)
+	}
+
+	// Joined output should match what GenerateFromMessages returns.
+	joined := GenerateFromMessages(messages, analyzer.StatusTaskComplete, cfg)
+	if joined != appendActions(body, actions) {
+		t.Errorf("GenerateFromMessages joined = %q, want %q", joined, appendActions(body, actions))
+	}
+}
+
+func TestGenerateFromMessagesStructured_APIErrorHasNoActions(t *testing.T) {
+	cfg := config.DefaultConfig()
+	messages := []jsonl.Message{
+		{
+			Type:      "assistant",
+			Timestamp: time.Now().Format(time.RFC3339),
+			Message:   jsonl.MessageContent{Content: []jsonl.Content{{Type: "text", Text: "401 unauthorized"}}},
+		},
+	}
+	body, actions := GenerateFromMessagesStructured(messages, analyzer.StatusAPIError, cfg)
+	if body != "Please run /login" {
+		t.Errorf("body = %q, want 'Please run /login'", body)
+	}
+	if actions != "" {
+		t.Errorf("actions = %q, want empty for API error", actions)
+	}
+}
+
+func TestGenerateFromMessagesStructured_EmptyMessages(t *testing.T) {
+	cfg := config.DefaultConfig()
+	body, actions := GenerateFromMessagesStructured(nil, analyzer.StatusTaskComplete, cfg)
+	if body == "" {
+		t.Error("body should not be empty for empty messages (default fallback)")
+	}
+	if actions != "" {
+		t.Errorf("actions = %q, want empty for empty messages", actions)
 	}
 }

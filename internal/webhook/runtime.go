@@ -18,11 +18,22 @@ import (
 var templatePattern = regexp.MustCompile(`\$\{\{\s*([^{}]+?)\s*\}\}`)
 
 // SendContext carries per-notification metadata used by webhook templates.
+//
+// Message remains the pre-joined "[session|branch folder] body actions" string
+// so existing ${{message}} templates and downstream consumers keep working. The
+// structured fields below let formatters that render rich layouts (e.g. Discord
+// embeds) avoid re-parsing the joined output.
 type SendContext struct {
 	Status    analyzer.Status
 	Message   string
 	SessionID string
 	CWD       string
+
+	SessionName   string // friendly session label (e.g. "phoenix 439d1884")
+	GitBranch     string // empty when CWD is not a git working tree
+	Folder        string // filepath.Base(CWD); empty when CWD is empty
+	RawBody       string // summary body without prefix/actions
+	ActionSummary string // action segment only (e.g. "📝 1 new  ▶ 2 cmds  ⏱ 41s")
 }
 
 type runtimeContext struct {
@@ -175,16 +186,26 @@ func (c *runtimeContext) lookupTemplateValue(token string) (interface{}, bool, e
 	case "session_id":
 		return c.sendCtx.SessionID, true, nil
 	case "session_name":
+		if c.sendCtx.SessionName != "" {
+			return c.sendCtx.SessionName, true, nil
+		}
 		return sessionname.GenerateSessionLabel(c.sendCtx.SessionID), true, nil
 	case "source":
 		return "claude-notifications", true, nil
 	case "cwd":
 		return c.sendCtx.CWD, true, nil
 	case "folder":
+		if c.sendCtx.Folder != "" {
+			return c.sendCtx.Folder, true, nil
+		}
 		if c.sendCtx.CWD == "" {
 			return "", false, nil
 		}
 		return filepath.Base(c.sendCtx.CWD), true, nil
+	case "raw_body":
+		return c.sendCtx.RawBody, c.sendCtx.RawBody != "", nil
+	case "action_summary":
+		return c.sendCtx.ActionSummary, c.sendCtx.ActionSummary != "", nil
 	case "time.rfc3339":
 		return c.now.Format(time.RFC3339), true, nil
 	case "time.unix":
@@ -213,6 +234,9 @@ func (c *runtimeContext) lookupGitTemplateValue(token string) (interface{}, bool
 
 	switch token {
 	case "git.branch":
+		if c.sendCtx.GitBranch != "" {
+			return c.sendCtx.GitBranch, true, nil
+		}
 		return meta.Branch, meta.Branch != "", nil
 	case "git.user.name":
 		return meta.UserName, meta.UserName != "", nil

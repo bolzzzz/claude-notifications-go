@@ -192,7 +192,7 @@ func (s *Sender) buildPayload(runtimeCtx *runtimeContext) ([]byte, string, error
 
 	// Use formatter if available
 	if formatter, ok := s.formatters[webhookCfg.Preset]; ok {
-		payload, err := formatter.Format(sendCtx.Status, sendCtx.Message, sendCtx.SessionID, statusInfo)
+		payload, err := formatter.Format(sendCtx, statusInfo)
 		if err != nil {
 			return nil, "", err
 		}
