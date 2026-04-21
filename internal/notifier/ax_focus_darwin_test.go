@@ -254,3 +254,59 @@ func TestTryGhosttyAppleScriptFocus_UsesNormalizedCandidates(t *testing.T) {
 		t.Fatalf("runner candidates = %#v, want %#v", gotCandidates, wantCandidates)
 	}
 }
+
+func TestTryGhosttyExactFocus_PrefersTerminalID(t *testing.T) {
+	originalIDRunner := ghosttyAppleScriptIDRunner
+	originalRunner := ghosttyAppleScriptRunner
+	t.Cleanup(func() {
+		ghosttyAppleScriptIDRunner = originalIDRunner
+		ghosttyAppleScriptRunner = originalRunner
+	})
+
+	gotID := ""
+	ghosttyAppleScriptIDRunner = func(terminalID string) error {
+		gotID = terminalID
+		return nil
+	}
+	ghosttyAppleScriptRunner = func(candidates []string) error {
+		t.Fatalf("cwd fallback should not run when terminal ID succeeds, got %#v", candidates)
+		return nil
+	}
+
+	err := tryGhosttyExactFocus("/tmp/project", FocusWindowOptions{GhosttyTerminalID: "term-7"})
+	if err != nil {
+		t.Fatalf("tryGhosttyExactFocus returned error: %v", err)
+	}
+	if gotID != "term-7" {
+		t.Fatalf("terminal ID = %q, want term-7", gotID)
+	}
+}
+
+func TestTryGhosttyExactFocus_FallsBackToCWDWhenTerminalIDFails(t *testing.T) {
+	originalIDRunner := ghosttyAppleScriptIDRunner
+	originalRunner := ghosttyAppleScriptRunner
+	t.Cleanup(func() {
+		ghosttyAppleScriptIDRunner = originalIDRunner
+		ghosttyAppleScriptRunner = originalRunner
+	})
+
+	ghosttyAppleScriptIDRunner = func(terminalID string) error {
+		return errors.New("not found")
+	}
+
+	var gotCandidates []string
+	ghosttyAppleScriptRunner = func(candidates []string) error {
+		gotCandidates = append([]string(nil), candidates...)
+		return nil
+	}
+
+	err := tryGhosttyExactFocus("/tmp/project", FocusWindowOptions{GhosttyTerminalID: "term-7"})
+	if err != nil {
+		t.Fatalf("tryGhosttyExactFocus returned error: %v", err)
+	}
+
+	wantCandidates := []string{"/tmp/project"}
+	if !reflect.DeepEqual(gotCandidates, wantCandidates) {
+		t.Fatalf("runner candidates = %#v, want %#v", gotCandidates, wantCandidates)
+	}
+}

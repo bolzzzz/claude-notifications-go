@@ -45,7 +45,12 @@ func main() {
 			fmt.Fprintf(os.Stderr, "Error: focus-window requires bundleID and cwd arguments\n")
 			os.Exit(1)
 		}
-		if err := notifier.FocusAppWindow(os.Args[2], os.Args[3]); err != nil {
+		opts, err := parseFocusWindowOptions(os.Args[4:])
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "focus-window: %v\n", err)
+			os.Exit(1)
+		}
+		if err := notifier.FocusAppWindowWithOptions(os.Args[2], os.Args[3], opts); err != nil {
 			fmt.Fprintf(os.Stderr, "focus-window: %v\n", err)
 			os.Exit(1)
 		}
@@ -162,6 +167,25 @@ func runPlaySound(args []string) {
 	}
 }
 
+func parseFocusWindowOptions(args []string) (notifier.FocusWindowOptions, error) {
+	var opts notifier.FocusWindowOptions
+
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--ghostty-terminal-id":
+			if i+1 >= len(args) {
+				return opts, fmt.Errorf("--ghostty-terminal-id requires a value")
+			}
+			i++
+			opts.GhosttyTerminalID = args[i]
+		default:
+			return opts, fmt.Errorf("unknown focus-window option: %s", args[i])
+		}
+	}
+
+	return opts, nil
+}
+
 func printUsage() {
 	fmt.Println("claude-notifications - Smart notifications for Claude Code")
 	fmt.Println()
@@ -178,7 +202,7 @@ func printUsage() {
 	fmt.Println("                          HookName: PreToolUse, Stop, SubagentStop, Notification")
 	fmt.Println("  daemon                  Run the notification daemon (Linux only)")
 	fmt.Println("                          For click-to-focus support on desktop notifications")
-	fmt.Println("  focus-window <bundleID> <cwd>")
+	fmt.Println("  focus-window <bundleID> <cwd> [--ghostty-terminal-id <id>]")
 	fmt.Println("                          Focus specific app window (internal, used by click-to-focus)")
 	fmt.Println("  version                 Show version information")
 	fmt.Println("  help                    Show this help message")
