@@ -96,6 +96,113 @@ If your temp directory is on a different drive than your user profile (or where 
 
 Make sure `%TEMP%` and `%TMP%` point to a directory on the same drive as `%USERPROFILE%` (or where Claude stores its plugin directories), then restart your terminal/app.
 
+## Windows: hooks do not fire or notifications are silent
+
+### Symptom
+
+The plugin is installed and the Windows executable exists, but Claude Code does not show notifications for `Stop`, `ExitPlanMode`, `AskUserQuestion`, or `permission_prompt`. Claude Code debug logs may show hook command failures, or the hook may fail silently.
+
+### Why it happens
+
+The bundled plugin hook configuration uses `bin/hook-wrapper.sh`. On some Windows 11 Claude Code environments, bash/shebang resolution, `${CLAUDE_PLUGIN_ROOT}` expansion, or Unix-only paths like `/dev/tty` are not reliable enough for command hooks.
+
+Claude Code supports PowerShell command hooks on Windows via `"shell": "powershell"`, so the safer Windows workaround is to call the native `.exe` directly with an absolute path.
+
+### Fix (recommended)
+
+Generate a PowerShell hook configuration from the installed executable:
+
+```powershell
+.\bin\claude-notifications-windows-amd64.exe windows-hooks
+```
+
+If you downloaded the executable to a different location, pass it explicitly:
+
+```powershell
+.\bin\claude-notifications-windows-amd64.exe windows-hooks --exe "C:\absolute\path\to\claude-notifications-windows-amd64.exe"
+```
+
+Copy the generated `"hooks"` object into `%USERPROFILE%\.claude\settings.json`. This command only prints JSON - it does not modify your settings file.
+
+### Manual fallback
+
+If you cannot run `windows-hooks`, add this block manually and replace `<absolute-path-to-plugin>` with the actual plugin install directory:
+
+```json
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "ExitPlanMode|AskUserQuestion",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$input | & \"<absolute-path-to-plugin>\\bin\\claude-notifications-windows-amd64.exe\" handle-hook PreToolUse",
+            "timeout": 30,
+            "shell": "powershell"
+          }
+        ]
+      }
+    ],
+    "Notification": [
+      {
+        "matcher": "permission_prompt",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$input | & \"<absolute-path-to-plugin>\\bin\\claude-notifications-windows-amd64.exe\" handle-hook Notification",
+            "timeout": 30,
+            "shell": "powershell"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$input | & \"<absolute-path-to-plugin>\\bin\\claude-notifications-windows-amd64.exe\" handle-hook Stop",
+            "timeout": 30,
+            "shell": "powershell"
+          }
+        ]
+      }
+    ],
+    "SubagentStop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$input | & \"<absolute-path-to-plugin>\\bin\\claude-notifications-windows-amd64.exe\" handle-hook SubagentStop",
+            "timeout": 30,
+            "shell": "powershell"
+          }
+        ]
+      }
+    ],
+    "TeammateIdle": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$input | & \"<absolute-path-to-plugin>\\bin\\claude-notifications-windows-amd64.exe\" handle-hook TeammateIdle",
+            "timeout": 30,
+            "shell": "powershell"
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+This workaround is based on confirmed Windows 11 behavior from [issue #73](https://github.com/777genius/claude-notifications-go/issues/73#issuecomment-4364271319).
+
+### Note about beeep logs
+
+If the log contains `beeep.Notify failed on windows: doc.LoadXml(tmpl)` but the toast still appears, treat it as a harmless Windows notifier false positive. Investigate it only if no popup appears.
+
 ## Windows / Git Bash: binary download fails from GitHub Releases
 
 ### Symptom

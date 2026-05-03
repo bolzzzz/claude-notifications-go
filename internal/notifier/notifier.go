@@ -176,6 +176,10 @@ func (n *Notifier) sendWithTerminalNotifier(title, message, subtitle, sessionID 
 	}
 
 	bundleID := GetTerminalBundleID(n.cfg.Notifications.Desktop.TerminalBundleID)
+	ghosttyTerminalID := ""
+	if clickToFocus && isGhosttyBundleID(bundleID) {
+		ghosttyTerminalID = loadStoredGhosttyTerminalID(sessionID)
+	}
 
 	var args []string
 	if muxArgs, muxName := detectMultiplexerArgs(title, message, bundleID); muxArgs != nil {
@@ -185,7 +189,7 @@ func (n *Notifier) sendWithTerminalNotifier(title, message, subtitle, sessionID 
 		if muxName != "" {
 			logging.Debug("%s detected but target capture failed, falling back to -activate", muxName)
 		}
-		args = buildTerminalNotifierArgs(title, message, bundleID, cwd, clickToFocus)
+		args = buildTerminalNotifierArgsWithOptions(title, message, bundleID, cwd, ghosttyTerminalID, clickToFocus)
 	}
 
 	// Append shared options: subtitle, threadID, timeSensitive, nosound
@@ -300,6 +304,10 @@ func claudeNotifierAppPath(notifierPath string) (string, bool) {
 // When cwd is provided, uses -execute with a focus script instead of -activate.
 // Exported for testing purposes.
 func buildTerminalNotifierArgs(title, message, bundleID, cwd string, clickToFocus bool) []string {
+	return buildTerminalNotifierArgsWithOptions(title, message, bundleID, cwd, "", clickToFocus)
+}
+
+func buildTerminalNotifierArgsWithOptions(title, message, bundleID, cwd, ghosttyTerminalID string, clickToFocus bool) []string {
 	args := []string{
 		"-title", title,
 		"-message", message,
@@ -308,7 +316,7 @@ func buildTerminalNotifierArgs(title, message, bundleID, cwd string, clickToFocu
 	if clickToFocus {
 		// Note: -sender option removed because it conflicts with -activate on macOS Sequoia (15.x)
 		// Using -sender causes click-to-focus to stop working.
-		if script := buildFocusScript(bundleID, cwd); script != "" {
+		if script := buildFocusScriptWithOptions(bundleID, cwd, ghosttyTerminalID); script != "" {
 			args = append(args, "-execute", script)
 		} else {
 			args = append(args, "-activate", bundleID)
@@ -329,6 +337,10 @@ func buildTerminalNotifierArgs(title, message, bundleID, cwd string, clickToFocu
 // raise the correct window across Spaces.
 // Returns "" when cwd is empty or unusable (caller should use -activate instead).
 func buildFocusScript(bundleID, cwd string) string {
+	return buildFocusScriptWithOptions(bundleID, cwd, "")
+}
+
+func buildFocusScriptWithOptions(bundleID, cwd, ghosttyTerminalID string) string {
 	if isIterm2BundleID(bundleID) {
 		return buildIterm2FocusScript(cwd)
 	}
@@ -337,7 +349,7 @@ func buildFocusScript(bundleID, cwd string) string {
 		if cwd == "" {
 			return ""
 		}
-		return buildGhosttyFocusScript(bundleID, cwd)
+		return buildGhosttyFocusScript(bundleID, cwd, ghosttyTerminalID)
 	}
 
 	if cwd == "" {
@@ -359,7 +371,7 @@ func buildFocusScript(bundleID, cwd string) string {
 	// The focus-window approach uses Accessibility + Screen Recording instead of Automation,
 	// with graceful fallback to app-level activation when permissions are not granted.
 	// See: https://github.com/777genius/claude-notifications-go/issues/47
-	return buildBinaryFocusScript(bundleID, cwd)
+	return buildBinaryFocusScript(bundleID, cwd, "")
 }
 
 // isElectronEditorBundleID reports whether bundleID belongs to an Electron-based
@@ -385,7 +397,7 @@ func shellQuote(s string) string {
 // buildBinaryFocusScript builds the -execute script for apps that use the
 // binary's focus-window subcommand (all macOS terminals including Electron editors and Ghostty).
 // Returns "" (causing -activate fallback) if os.Executable() fails.
-func buildBinaryFocusScript(bundleID, cwd string) string {
+func buildBinaryFocusScript(bundleID, cwd, ghosttyTerminalID string) string {
 	exe, err := os.Executable()
 	if err != nil {
 		return ""
@@ -394,7 +406,11 @@ func buildBinaryFocusScript(bundleID, cwd string) string {
 	if err != nil {
 		return ""
 	}
-	return shellQuote(exe) + " focus-window " + shellQuote(bundleID) + " " + shellQuote(cwd)
+	cmd := shellQuote(exe) + " focus-window " + shellQuote(bundleID) + " " + shellQuote(cwd)
+	if isGhosttyBundleID(bundleID) && ghosttyTerminalID != "" {
+		cmd += " --ghostty-terminal-id " + shellQuote(ghosttyTerminalID)
+	}
+	return cmd
 }
 
 // buildElectronEditorFocusScript builds the -execute script for Electron-based
@@ -402,7 +418,7 @@ func buildBinaryFocusScript(bundleID, cwd string) string {
 // activates the app, waits for AXWindows to populate, then raises the window
 // matching cwd.
 func buildElectronEditorFocusScript(bundleID, cwd string) string {
-	return buildBinaryFocusScript(bundleID, cwd)
+	return buildBinaryFocusScript(bundleID, cwd, "")
 }
 
 // buildGhosttyFocusScript builds the -execute script for Ghostty.
@@ -410,8 +426,8 @@ func buildElectronEditorFocusScript(bundleID, cwd string) string {
 // waits for AXWindows to populate, then raises the window matching cwd via
 // AXDocument (OSC 7 file:// URL). AXDocument is window-level only; tabs and
 // split panes within a window are not individually addressable.
-func buildGhosttyFocusScript(bundleID, cwd string) string {
-	return buildBinaryFocusScript(bundleID, cwd)
+func buildGhosttyFocusScript(bundleID, cwd, ghosttyTerminalID string) string {
+	return buildBinaryFocusScript(bundleID, cwd, ghosttyTerminalID)
 }
 
 // cwdToFileURL converts an absolute path to a file:// URL. Ghostty exposes the

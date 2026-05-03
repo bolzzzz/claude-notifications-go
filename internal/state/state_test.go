@@ -135,6 +135,31 @@ func TestManager_UpdateInteractiveTool_ExistingState(t *testing.T) {
 	assert.Equal(t, int64(12345), state.LastTaskCompleteTime)
 }
 
+func TestManager_UpdateGhosttyTerminalID_PreservesExistingFields(t *testing.T) {
+	mgr := NewManager()
+	sessionID := "test-ghostty-terminal-id"
+	defer func() { _ = mgr.Delete(sessionID) }()
+
+	initial := &SessionState{
+		SessionID:           sessionID,
+		LastInteractiveTool: "ExitPlanMode",
+		CWD:                 "/test/dir",
+	}
+	err := mgr.Save(initial)
+	require.NoError(t, err)
+
+	err = mgr.UpdateGhosttyTerminalID(sessionID, "term-42")
+	require.NoError(t, err)
+
+	state, err := mgr.Load(sessionID)
+	require.NoError(t, err)
+	require.NotNil(t, state)
+
+	assert.Equal(t, "ExitPlanMode", state.LastInteractiveTool)
+	assert.Equal(t, "/test/dir", state.CWD)
+	assert.Equal(t, "term-42", state.GhosttyTerminalID)
+}
+
 // === UpdateTaskComplete Tests ===
 
 func TestManager_UpdateTaskComplete_NewState(t *testing.T) {

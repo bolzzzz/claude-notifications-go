@@ -144,6 +144,14 @@ func (h *Handler) HandleHook(hookEvent string, input io.Reader) error {
 		logging.Warn("Session ID is empty, using 'unknown'")
 	}
 
+	if h.cfg.Notifications.Desktop.ClickToFocus && (hookEvent == "PreToolUse" || hookEvent == "Notification") {
+		notifier.MaybeCaptureGhosttyTerminalID(
+			h.cfg.Notifications.Desktop.TerminalBundleID,
+			hookData.SessionID,
+			hookData.CWD,
+		)
+	}
+
 	// Phase 1: Early duplicate check (per hook event type)
 	bench.Start("dedup.early_check")
 	if h.dedupMgr.CheckEarlyDuplicate(hookData.SessionID, hookEvent) {

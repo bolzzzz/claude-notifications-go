@@ -20,6 +20,7 @@ type SessionState struct {
 	LastNotificationTime    int64  `json:"last_notification_ts,omitempty"`
 	LastNotificationStatus  string `json:"last_notification_status,omitempty"`
 	LastNotificationMessage string `json:"last_notification_message,omitempty"`
+	GhosttyTerminalID       string `json:"ghostty_terminal_id,omitempty"`
 	CWD                     string `json:"cwd"`
 }
 
@@ -107,6 +108,25 @@ func (m *Manager) UpdateInteractiveTool(sessionID, toolName, cwd string) error {
 	state.LastInteractiveTool = toolName
 	state.LastTimestamp = platform.CurrentTimestamp()
 	state.CWD = cwd
+
+	return m.Save(state)
+}
+
+// UpdateGhosttyTerminalID stores the exact Ghostty terminal ID associated with a
+// Claude session so future notification clicks can target the correct tab.
+func (m *Manager) UpdateGhosttyTerminalID(sessionID, terminalID string) error {
+	state, err := m.Load(sessionID)
+	if err != nil {
+		return err
+	}
+
+	if state == nil {
+		state = &SessionState{
+			SessionID: sessionID,
+		}
+	}
+
+	state.GhosttyTerminalID = strings.TrimSpace(terminalID)
 
 	return m.Save(state)
 }

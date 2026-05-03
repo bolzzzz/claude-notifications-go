@@ -274,6 +274,11 @@ const windowFocusRetryAfterRestore = 2
 const ghosttyAppleScriptFocusTimeout = 1500 * time.Millisecond
 
 var ghosttyAppleScriptRunner = runGhosttyAppleScriptFocus
+var ghosttyAppleScriptIDRunner = runGhosttyAppleScriptFocusByID
+
+type FocusWindowOptions struct {
+	GhosttyTerminalID string
+}
 
 // retryWindowFocus calls fn with increasing delays until a non-zero result.
 // Returns 1 (found), -1 (no permission), or 0 (not found after all attempts).
@@ -315,11 +320,15 @@ func retryWindowFocusWithDelays(fn func() int, delays []time.Duration, sleep fun
 }
 
 // FocusAppWindow raises the window matching cwd for the given bundleID app.
-// For Ghostty: first tries exact terminal/tab focus via AppleScript, then falls
-// back to AXDocument (OSC 7 file:// URL) if Automation is unavailable or no
-// exact terminal match is found.
+// For Ghostty: first tries an exact terminal ID match when available, then
+// falls back to exact AppleScript cwd matching, then finally AXDocument
+// (OSC 7 file:// URL) if Automation is unavailable or no exact match is found.
 // For other apps: uses CGS to find the window across Spaces then raises via AXTitle. macOS only.
 func FocusAppWindow(bundleID, cwd string) error {
+	return FocusAppWindowWithOptions(bundleID, cwd, FocusWindowOptions{})
+}
+
+func FocusAppWindowWithOptions(bundleID, cwd string, opts FocusWindowOptions) error {
 	cBundleID := C.CString(bundleID)
 	defer C.free(unsafe.Pointer(cBundleID))
 
@@ -332,7 +341,7 @@ func FocusAppWindow(bundleID, cwd string) error {
 		if cwd == "" {
 			return fmt.Errorf("invalid cwd: %s", cwd)
 		}
-		return focusGhosttyWindow(pid, bundleID, cwd, tryGhosttyAppleScriptFocus, focusGhosttyWindowByAXDocument)
+		return focusGhosttyWindowWithOptions(pid, bundleID, cwd, opts, tryGhosttyExactFocus, focusGhosttyWindowByAXDocument)
 	}
 
 	folderName := filepath.Base(cwd)
@@ -381,12 +390,41 @@ func focusGhosttyWindow(
 	exactFocus func(string) error,
 	fallback func(int, string, string) error,
 ) error {
-	if err := exactFocus(cwd); err == nil {
+	return focusGhosttyWindowWithOptions(
+		pid,
+		bundleID,
+		cwd,
+		FocusWindowOptions{},
+		func(cwd string, _ FocusWindowOptions) error { return exactFocus(cwd) },
+		fallback,
+	)
+}
+
+func focusGhosttyWindowWithOptions(
+	pid int,
+	bundleID, cwd string,
+	opts FocusWindowOptions,
+	exactFocus func(string, FocusWindowOptions) error,
+	fallback func(int, string, string) error,
+) error {
+	if err := exactFocus(cwd, opts); err == nil {
 		return nil
 	} else {
 		logging.Debug("Ghostty exact tab focus unavailable, falling back to AXDocument: %v", err)
 	}
 	return fallback(pid, bundleID, cwd)
+}
+
+func tryGhosttyExactFocus(cwd string, opts FocusWindowOptions) error {
+	if terminalID := strings.TrimSpace(opts.GhosttyTerminalID); terminalID != "" {
+		if err := ghosttyAppleScriptIDRunner(terminalID); err == nil {
+			return nil
+		} else {
+			logging.Debug("Ghostty terminal-id focus failed for %s, falling back to cwd match: %v", terminalID, err)
+		}
+	}
+
+	return tryGhosttyAppleScriptFocus(cwd)
 }
 
 func tryGhosttyAppleScriptFocus(cwd string) error {
@@ -395,6 +433,35 @@ func tryGhosttyAppleScriptFocus(cwd string) error {
 		return fmt.Errorf("invalid cwd: %s", cwd)
 	}
 	return ghosttyAppleScriptRunner(candidates)
+}
+
+func runGhosttyAppleScriptFocusByID(terminalID string) error {
+	if strings.TrimSpace(terminalID) == "" {
+		return fmt.Errorf("empty Ghostty terminal ID")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), ghosttyAppleScriptFocusTimeout)
+	defer cancel()
+
+	output, err := exec.CommandContext(
+		ctx,
+		"/usr/bin/osascript",
+		"-e",
+		ghosttyFocusByIDAppleScript,
+		"--",
+		terminalID,
+	).CombinedOutput()
+	if ctx.Err() == context.DeadlineExceeded {
+		return fmt.Errorf("Ghostty terminal-id AppleScript timed out after %s", ghosttyAppleScriptFocusTimeout)
+	}
+	if err != nil {
+		outputText := strings.TrimSpace(string(output))
+		if outputText == "" {
+			return fmt.Errorf("Ghostty terminal-id AppleScript failed: %w", err)
+		}
+		return fmt.Errorf("Ghostty terminal-id AppleScript failed: %w: %s", err, outputText)
+	}
+	return nil
 }
 
 func runGhosttyAppleScriptFocus(candidates []string) error {
@@ -511,6 +578,29 @@ on run argv
 		return
 	end if
 	error "ghostty terminal not found" number 1001
+end run
+`
+
+const ghosttyFocusByIDAppleScript = `
+on run argv
+	if (count of argv) is 0 then
+		error "missing Ghostty terminal id" number 1002
+	end if
+
+	set wantedID to item 1 of argv
+
+	tell application "Ghostty"
+		repeat with t in terminals
+			try
+				if (id of t as string) is wantedID then
+					focus t
+					return
+				end if
+			end try
+		end repeat
+	end tell
+
+	error "ghostty terminal id not found" number 1002
 end run
 `
 

@@ -1,10 +1,12 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 
 	"github.com/777genius/claude-notifications/internal/audio"
 	"github.com/777genius/claude-notifications/internal/errorhandler"
@@ -45,7 +47,12 @@ func main() {
 			fmt.Fprintf(os.Stderr, "Error: focus-window requires bundleID and cwd arguments\n")
 			os.Exit(1)
 		}
-		if err := notifier.FocusAppWindow(os.Args[2], os.Args[3]); err != nil {
+		opts, err := parseFocusWindowOptions(os.Args[4:])
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "focus-window: %v\n", err)
+			os.Exit(1)
+		}
+		if err := notifier.FocusAppWindowWithOptions(os.Args[2], os.Args[3], opts); err != nil {
 			fmt.Fprintf(os.Stderr, "focus-window: %v\n", err)
 			os.Exit(1)
 		}
@@ -53,6 +60,8 @@ func main() {
 		runPlaySound(os.Args[2:])
 	case "daemon", "--daemon":
 		runDaemon()
+	case "windows-hooks":
+		runWindowsHooks(os.Args[2:])
 	case "version", "--version", "-v":
 		fmt.Printf("claude-notifications v%s\n", version)
 	case "help", "--help", "-h":
@@ -62,6 +71,125 @@ func main() {
 		printUsage()
 		os.Exit(1)
 	}
+}
+
+type hookSettings struct {
+	Hooks map[string][]hookMatcherGroup `json:"hooks"`
+}
+
+type hookMatcherGroup struct {
+	Matcher string        `json:"matcher,omitempty"`
+	Hooks   []hookCommand `json:"hooks"`
+}
+
+type hookCommand struct {
+	Type    string `json:"type"`
+	Command string `json:"command"`
+	Timeout int    `json:"timeout"`
+	Shell   string `json:"shell"`
+}
+
+func runWindowsHooks(args []string) {
+	exePath, err := parseWindowsHooksExecutable(args)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "windows-hooks: %v\n", err)
+		os.Exit(1)
+	}
+
+	settings := hookSettings{
+		Hooks: map[string][]hookMatcherGroup{
+			"PreToolUse": {
+				{
+					Matcher: "ExitPlanMode|AskUserQuestion",
+					Hooks:   []hookCommand{newPowerShellHook(exePath, "PreToolUse")},
+				},
+			},
+			"Notification": {
+				{
+					Matcher: "permission_prompt",
+					Hooks:   []hookCommand{newPowerShellHook(exePath, "Notification")},
+				},
+			},
+			"Stop": {
+				{
+					Hooks: []hookCommand{newPowerShellHook(exePath, "Stop")},
+				},
+			},
+			"SubagentStop": {
+				{
+					Hooks: []hookCommand{newPowerShellHook(exePath, "SubagentStop")},
+				},
+			},
+			"TeammateIdle": {
+				{
+					Hooks: []hookCommand{newPowerShellHook(exePath, "TeammateIdle")},
+				},
+			},
+		},
+	}
+
+	out, err := json.MarshalIndent(settings, "", "  ")
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "windows-hooks: failed to render JSON: %v\n", err)
+		os.Exit(1)
+	}
+
+	fmt.Println(string(out))
+}
+
+func parseWindowsHooksExecutable(args []string) (string, error) {
+	exeOverride := ""
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--exe":
+			if i+1 >= len(args) {
+				return "", fmt.Errorf("--exe requires a path")
+			}
+			i++
+			exeOverride = args[i]
+		default:
+			return "", fmt.Errorf("unknown windows-hooks option: %s", args[i])
+		}
+	}
+
+	if exeOverride != "" {
+		return filepath.Abs(exeOverride)
+	}
+
+	exePath, err := os.Executable()
+	if err != nil {
+		return "", fmt.Errorf("failed to detect executable path: %w", err)
+	}
+
+	exePath, err = filepath.Abs(exePath)
+	if err != nil {
+		return "", fmt.Errorf("failed to resolve executable path: %w", err)
+	}
+
+	if strings.EqualFold(filepath.Ext(exePath), ".exe") {
+		return exePath, nil
+	}
+
+	pluginRoot := getPluginRoot()
+	return filepath.Abs(filepath.Join(pluginRoot, "bin", "claude-notifications-windows-amd64.exe"))
+}
+
+func newPowerShellHook(exePath, hookName string) hookCommand {
+	return hookCommand{
+		Type:    "command",
+		Command: "$input | & " + powershellDoubleQuoted(exePath) + " handle-hook " + hookName,
+		Timeout: 30,
+		Shell:   "powershell",
+	}
+}
+
+func powershellDoubleQuoted(value string) string {
+	replacer := strings.NewReplacer(
+		"`", "``",
+		"$", "`$",
+		"\"", "`\"",
+	)
+	return `"` + replacer.Replace(value) + `"`
 }
 
 func handleHook(hookEvent string) {
@@ -162,6 +290,25 @@ func runPlaySound(args []string) {
 	}
 }
 
+func parseFocusWindowOptions(args []string) (notifier.FocusWindowOptions, error) {
+	var opts notifier.FocusWindowOptions
+
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--ghostty-terminal-id":
+			if i+1 >= len(args) {
+				return opts, fmt.Errorf("--ghostty-terminal-id requires a value")
+			}
+			i++
+			opts.GhosttyTerminalID = args[i]
+		default:
+			return opts, fmt.Errorf("unknown focus-window option: %s", args[i])
+		}
+	}
+
+	return opts, nil
+}
+
 func printUsage() {
 	fmt.Println("claude-notifications - Smart notifications for Claude Code")
 	fmt.Println()
@@ -170,6 +317,7 @@ func printUsage() {
 	fmt.Println("Usage:")
 	fmt.Println("  claude-notifications handle-hook <HookName>")
 	fmt.Println("  claude-notifications daemon")
+	fmt.Println("  claude-notifications windows-hooks [--exe <path>]")
 	fmt.Println("  claude-notifications version")
 	fmt.Println("  claude-notifications help")
 	fmt.Println()
@@ -178,8 +326,10 @@ func printUsage() {
 	fmt.Println("                          HookName: PreToolUse, Stop, SubagentStop, Notification")
 	fmt.Println("  daemon                  Run the notification daemon (Linux only)")
 	fmt.Println("                          For click-to-focus support on desktop notifications")
-	fmt.Println("  focus-window <bundleID> <cwd>")
+	fmt.Println("  focus-window <bundleID> <cwd> [--ghostty-terminal-id <id>]")
 	fmt.Println("                          Focus specific app window (internal, used by click-to-focus)")
+	fmt.Println("  windows-hooks           Print PowerShell hook JSON for Windows settings")
+	fmt.Println("                          Does not modify ~/.claude/settings.json")
 	fmt.Println("  version                 Show version information")
 	fmt.Println("  help                    Show this help message")
 	fmt.Println()
@@ -192,6 +342,9 @@ func printUsage() {
 	fmt.Println()
 	fmt.Println("  # Run notification daemon (Linux only, started automatically)")
 	fmt.Println("  claude-notifications daemon")
+	fmt.Println()
+	fmt.Println("  # Print Windows PowerShell hook configuration")
+	fmt.Println("  claude-notifications windows-hooks")
 	fmt.Println()
 	fmt.Println("Environment Variables:")
 	fmt.Println("  CLAUDE_PLUGIN_ROOT  Plugin root directory (auto-detected if not set)")

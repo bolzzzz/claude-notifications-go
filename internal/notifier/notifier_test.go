@@ -1265,6 +1265,13 @@ func TestBuildFocusScript_Ghostty_UsesFocusWindow(t *testing.T) {
 	}
 }
 
+func TestBuildFocusScriptWithOptions_Ghostty_IncludesTerminalID(t *testing.T) {
+	script := buildFocusScriptWithOptions("com.mitchellh.ghostty", "/home/user/my-project", "terminal-42")
+	if !strings.Contains(script, "--ghostty-terminal-id 'terminal-42'") {
+		t.Fatalf("Ghostty focus script should pass exact terminal ID, got: %s", script)
+	}
+}
+
 func TestCwdToFileURL(t *testing.T) {
 	tests := []struct {
 		cwd      string
