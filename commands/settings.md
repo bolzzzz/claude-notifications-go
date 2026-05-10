@@ -1,5 +1,6 @@
 ---
 description: Configure notification sounds and settings for claude-notifications plugin
+disable-model-invocation: true
 allowed-tools: Bash, AskUserQuestion, Write, Read
 ---
 

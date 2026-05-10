@@ -1,5 +1,6 @@
 ---
 description: "Alias for sounds — List available notification sounds"
+disable-model-invocation: true
 allowed-tools: Bash
 ---
 

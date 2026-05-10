@@ -1,5 +1,6 @@
 ---
 description: "Alias for settings — Configure notification sounds and settings"
+disable-model-invocation: true
 allowed-tools: Bash, AskUserQuestion, Write, Read
 ---
 

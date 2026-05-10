@@ -1,5 +1,6 @@
 ---
 description: List available notification sounds and preview them
+disable-model-invocation: true
 allowed-tools: Bash
 ---
 

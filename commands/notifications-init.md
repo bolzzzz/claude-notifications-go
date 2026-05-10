@@ -1,5 +1,6 @@
 ---
 description: "Alias for init — Download notification binary"
+disable-model-invocation: true
 allowed-tools: Bash
 ---
 

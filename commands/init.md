@@ -1,5 +1,6 @@
 ---
 description: Download notification binary for claude-notifications plugin
+disable-model-invocation: true
 allowed-tools: Bash
 ---
 
