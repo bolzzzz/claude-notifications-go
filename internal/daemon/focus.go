@@ -272,46 +272,59 @@ func activateWindowTitleWithXdotool(windowTitle string) error {
 // https://extensions.gnome.org/extension/5021/activate-window-by-title/
 // This method does NOT require unsafe_mode and works on GNOME 42+.
 //
-// It tries activateByWmClass first (reliable for Wayland-native terminals whose
-// WM class is a reverse-domain app ID, e.g. com.mitchellh.ghostty), then falls
-// back to activateBySubstring on the window title.
+// Search order:
+//  1. activateBySubstring with the folder-specific term, when available — ensures
+//     the correct project window is focused when multiple windows of the same app
+//     are open (e.g. two VS Code windows for different projects).
+//  2. activateByWmClass — reliable for Wayland-native terminals whose WM class is
+//     a reverse-domain app ID (e.g. com.mitchellh.ghostty, org.wezfurlong.wezterm)
+//     and whose window title does not contain the app name.
+//  3. activateBySubstring with the generic terminal name as a final fallback.
 func TryActivateWindowByTitle(terminalName, folderName string) error {
-	// Try activateByWmClass first — more reliable than title substring search
-	// for Wayland-native terminals that use reverse-domain app IDs as WM class.
-	wmClass := GetGnomeWmClass(terminalName)
-	if wmClass != "" {
+	gnomeActivate := func(method, arg string) bool {
 		cmd := exec.Command("busctl", "--user", "call",
 			"org.gnome.Shell",
 			"/de/lucaswerkmeister/ActivateWindowByTitle",
 			"de.lucaswerkmeister.ActivateWindowByTitle",
-			"activateByWmClass", "s", wmClass,
+			method, "s", arg,
 		)
 		output, err := cmd.CombinedOutput()
-		if err == nil {
-			outputStr := strings.TrimSpace(string(output))
-			if strings.Contains(outputStr, "true") {
-				return nil
-			}
+		return err == nil && strings.Contains(strings.TrimSpace(string(output)), "true")
+	}
+
+	// Step 1: folder-specific substring search (e.g. VS Code with a project folder).
+	// Only attempted when GetSearchTermWithFolder produces a different term than the
+	// plain terminal name — i.e. when the folder name is actually being used.
+	folderTerm := GetSearchTermWithFolder(terminalName, folderName)
+	if folderTerm != GetSearchTerm(terminalName) {
+		if gnomeActivate("activateBySubstring", folderTerm) {
+			return nil
 		}
 	}
 
-	// Fall back to substring title search.
-	searchTerm := GetSearchTermWithFolder(terminalName, folderName)
+	// Step 2: WM class match — most reliable for Wayland-native terminals.
+	if wmClass := GetGnomeWmClass(terminalName); wmClass != "" {
+		if gnomeActivate("activateByWmClass", wmClass) {
+			return nil
+		}
+	}
+
+	// Step 3: generic substring fallback.
+	genericTerm := GetSearchTerm(terminalName)
 	cmd := exec.Command("busctl", "--user", "call",
 		"org.gnome.Shell",
 		"/de/lucaswerkmeister/ActivateWindowByTitle",
 		"de.lucaswerkmeister.ActivateWindowByTitle",
-		"activateBySubstring", "s", searchTerm,
+		"activateBySubstring", "s", genericTerm,
 	)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("activate-window-by-title extension not available: %w, output: %s", err, string(output))
 	}
-	// busctl can succeed (exit code 0) even when no window was activated.
-	// The extension returns a boolean; ensure we only treat "true" as success.
+	// busctl can succeed (exit 0) even when no window was activated; check the boolean.
 	outputStr := strings.TrimSpace(string(output))
 	if strings.Contains(outputStr, "false") || outputStr == "" {
-		return fmt.Errorf("activate-window-by-title: no window activated for %q (output: %s)", searchTerm, outputStr)
+		return fmt.Errorf("activate-window-by-title: no window activated for %q (output: %s)", genericTerm, outputStr)
 	}
 	return nil
 }
