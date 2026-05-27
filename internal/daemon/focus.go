@@ -6,10 +6,12 @@ package daemon
 
 import (
 	"fmt"
+	"os"
 	"os/exec"
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // FocusMethod represents a method for focusing a window
@@ -46,25 +48,23 @@ func TryFocusWithWindowID(terminalName, folderName, windowID string) error {
 // TryFocusWithHints attempts exact focus using hook-time hints first, then falls back to
 // compositor-specific methods.
 // wezTermPaneID and wezTermSocket enable tab-level focus for WezTerm.
+//
+// For WezTerm, we raise the window first via compositor methods, then switch the pane
+// with a short delay. This ordering matters: GNOME's XDG Activation Token is processed
+// after the window-level call, and it may re-show the previously active tab if the pane
+// switch runs first. Doing the pane switch last ensures it wins.
 func TryFocusWithHints(terminalName, folderName, windowID, windowTitle, wezTermPaneID, wezTermSocket string) error {
-	// WezTerm pane focus: highest priority — switches to the exact tab.
-	if strings.TrimSpace(wezTermPaneID) != "" {
-		if err := TryWezTermPane(wezTermPaneID, wezTermSocket); err == nil {
-			return nil
-		}
-	}
-
 	var exactErr error
 	if strings.TrimSpace(windowID) != "" {
 		if err := tryX11WindowID(windowID); err == nil {
-			return nil
+			goto switchPane
 		} else {
 			exactErr = err
 		}
 	}
 	if strings.TrimSpace(windowTitle) != "" {
 		if err := tryWindowTitle(windowTitle); err == nil {
-			return nil
+			goto switchPane
 		} else if exactErr != nil {
 			exactErr = fmt.Errorf("%v; exact title focus failed: %v", exactErr, err)
 		} else {
@@ -72,39 +72,53 @@ func TryFocusWithHints(terminalName, folderName, windowID, windowTitle, wezTermP
 		}
 	}
 
-	methods := GetFocusMethods()
-
-	var lastErr error
-	for _, method := range methods {
-		if err := method.Fn(terminalName, folderName); err != nil {
-			lastErr = err
-			continue
+	{
+		methods := GetFocusMethods()
+		var lastErr error
+		for _, method := range methods {
+			if err := method.Fn(terminalName, folderName); err != nil {
+				lastErr = err
+				continue
+			}
+			goto switchPane
 		}
-		return nil
+
+		if strings.TrimSpace(wezTermPaneID) == "" {
+			if exactErr != nil && lastErr != nil {
+				return fmt.Errorf("%v; fallback focus failed, last error: %v", exactErr, lastErr)
+			}
+			if exactErr != nil {
+				return exactErr
+			}
+			return fmt.Errorf("all focus methods failed, last error: %v", lastErr)
+		}
 	}
 
-	if exactErr != nil && lastErr != nil {
-		return fmt.Errorf("%v; fallback focus failed, last error: %v", exactErr, lastErr)
+switchPane:
+	// Switch WezTerm to the exact pane. Sleep briefly so GNOME's activation token
+	// is processed before we switch tabs — otherwise the token may restore the
+	// previously active tab and undo the pane switch.
+	if strings.TrimSpace(wezTermPaneID) != "" {
+		time.Sleep(150 * time.Millisecond)
+		_ = TryWezTermPane(wezTermPaneID, wezTermSocket)
 	}
-	if exactErr != nil {
-		return exactErr
-	}
-	return fmt.Errorf("all focus methods failed, last error: %v", lastErr)
+	return nil
 }
 
 // TryWezTermPane activates a specific WezTerm pane by ID using the WezTerm CLI.
 // This switches to the exact tab/pane where Claude is running.
+// socketPath is passed via WEZTERM_UNIX_SOCKET env var (the CLI has no --unix-socket flag).
 func TryWezTermPane(paneID, socketPath string) error {
 	if _, err := exec.LookPath("wezterm"); err != nil {
 		return fmt.Errorf("wezterm not installed")
 	}
 
-	args := []string{"cli", "activate-pane", "--pane-id", paneID}
+	// --no-auto-start: fail instead of spawning a new mux server when socket is wrong.
+	cmd := exec.Command("wezterm", "cli", "--no-auto-start", "activate-pane", "--pane-id", paneID)
 	if strings.TrimSpace(socketPath) != "" {
-		args = append(args, "--unix-socket", socketPath)
+		cmd.Env = append(os.Environ(), "WEZTERM_UNIX_SOCKET="+socketPath)
 	}
 
-	cmd := exec.Command("wezterm", args...)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("wezterm cli activate-pane failed: %w, output: %s", err, strings.TrimSpace(string(output)))
