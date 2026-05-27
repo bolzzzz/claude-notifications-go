@@ -49,22 +49,28 @@ func TryFocusWithWindowID(terminalName, folderName, windowID string) error {
 // compositor-specific methods.
 // wezTermPaneID and wezTermSocket enable tab-level focus for WezTerm.
 //
-// For WezTerm, we raise the window first via compositor methods, then switch the pane
-// with a short delay. This ordering matters: GNOME's XDG Activation Token is processed
-// after the window-level call, and it may re-show the previously active tab if the pane
-// switch runs first. Doing the pane switch last ensures it wins.
+// For WezTerm, window-level focus runs first, then the pane switch runs after a short
+// delay. This ordering matters: GNOME's XDG Activation Token is processed asynchronously
+// after the window-level call and may restore the previously active tab if the pane
+// switch runs first. Running the pane switch last ensures it wins.
+// If all window-level methods fail but a pane ID is available, TryWezTermPane is tried
+// as a last resort (activate-pane also raises the window on WezTerm).
 func TryFocusWithHints(terminalName, folderName, windowID, windowTitle, wezTermPaneID, wezTermSocket string) error {
-	var exactErr error
+	wezTermPaneID = strings.TrimSpace(wezTermPaneID)
+	windowFocused := false
+	var exactErr, lastErr error
+
 	if strings.TrimSpace(windowID) != "" {
 		if err := tryX11WindowID(windowID); err == nil {
-			goto switchPane
+			windowFocused = true
 		} else {
 			exactErr = err
 		}
 	}
-	if strings.TrimSpace(windowTitle) != "" {
+
+	if !windowFocused && strings.TrimSpace(windowTitle) != "" {
 		if err := tryWindowTitle(windowTitle); err == nil {
-			goto switchPane
+			windowFocused = true
 		} else if exactErr != nil {
 			exactErr = fmt.Errorf("%v; exact title focus failed: %v", exactErr, err)
 		} else {
@@ -72,35 +78,47 @@ func TryFocusWithHints(terminalName, folderName, windowID, windowTitle, wezTermP
 		}
 	}
 
-	{
-		methods := GetFocusMethods()
-		var lastErr error
-		for _, method := range methods {
+	if !windowFocused {
+		for _, method := range GetFocusMethods() {
 			if err := method.Fn(terminalName, folderName); err != nil {
 				lastErr = err
 				continue
 			}
-			goto switchPane
-		}
-
-		if strings.TrimSpace(wezTermPaneID) == "" {
-			if exactErr != nil && lastErr != nil {
-				return fmt.Errorf("%v; fallback focus failed, last error: %v", exactErr, lastErr)
-			}
-			if exactErr != nil {
-				return exactErr
-			}
-			return fmt.Errorf("all focus methods failed, last error: %v", lastErr)
+			windowFocused = true
+			break
 		}
 	}
 
-switchPane:
-	// Switch WezTerm to the exact pane. Sleep briefly so GNOME's activation token
-	// is processed before we switch tabs — otherwise the token may restore the
-	// previously active tab and undo the pane switch.
-	if strings.TrimSpace(wezTermPaneID) != "" {
+	if wezTermPaneID != "" {
+		// Sleep briefly so GNOME's XDG Activation Token is processed before switching
+		// tabs — otherwise the token may restore the previously active tab and undo
+		// the pane switch.
 		time.Sleep(150 * time.Millisecond)
-		_ = TryWezTermPane(wezTermPaneID, wezTermSocket)
+		if err := TryWezTermPane(wezTermPaneID, wezTermSocket); err != nil && !windowFocused {
+			// Neither window-level focus nor pane switch succeeded.
+			if exactErr != nil && lastErr != nil {
+				return fmt.Errorf("%v; fallback focus failed, last error: %v; wezterm pane: %v", exactErr, lastErr, err)
+			}
+			if exactErr != nil {
+				return fmt.Errorf("%v; wezterm pane: %v", exactErr, err)
+			}
+			if lastErr != nil {
+				return fmt.Errorf("all focus methods failed, last error: %v; wezterm pane: %v", lastErr, err)
+			}
+			return fmt.Errorf("wezterm pane focus failed: %v", err)
+		}
+		// Pane switch succeeded, or window was already raised (pane switch is best-effort).
+		return nil
+	}
+
+	if !windowFocused {
+		if exactErr != nil && lastErr != nil {
+			return fmt.Errorf("%v; fallback focus failed, last error: %v", exactErr, lastErr)
+		}
+		if exactErr != nil {
+			return exactErr
+		}
+		return fmt.Errorf("all focus methods failed, last error: %v", lastErr)
 	}
 	return nil
 }
