@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.39.3] - 2026-05-28
+
+### Fixed
+- **Linux: GNOME click-to-focus now recognizes Wayland-native terminal WM classes** - GNOME focusing now uses reverse-domain WM class/app IDs for terminals such as Ghostty and WezTerm, so notification clicks can raise the correct window on Wayland sessions ([#89](https://github.com/777genius/claude-notifications-go/pull/89))
+- **Linux: WezTerm notification clicks can target the exact pane safely** - the daemon now carries WezTerm pane/socket hints from the hook process, raises the matching WezTerm window before switching panes, and ignores inherited `WEZTERM_*` variables when the focus target is not actually WezTerm ([#89](https://github.com/777genius/claude-notifications-go/pull/89))
+
 ## [1.39.2] - 2026-05-27
 
 ### Fixed
