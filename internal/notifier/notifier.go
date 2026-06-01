@@ -489,16 +489,24 @@ func (n *Notifier) sendWithBeeep(title, message, appIcon, sound string) error {
 		beeep.AppName = originalAppName
 	}()
 
-	// Send notification using beeep with proper title and clean message
-	if err := beeep.Notify(title, message, appIcon); err != nil {
+	// Send notification using beeep with proper title and clean message.
+	err := beeep.Notify(title, message, appIcon)
+	if err != nil {
 		logging.Error("beeep.Notify failed on %s: %v (AppName=%q, title=%q)", runtime.GOOS, err, beeep.AppName, title)
-		return err
+	} else {
+		logging.Debug("Desktop notification sent via beeep: title=%s", title)
 	}
 
-	logging.Debug("Desktop notification sent via beeep: title=%s", title)
-
+	// Play the sound regardless of the toast outcome. The desktop toast and the
+	// audio cue are independent signals, and on Windows beeep.Notify routinely
+	// returns an error even though the toast was delivered: go-toast falls back
+	// to its PowerShell path when the WinRT COM call fails, but Push() still
+	// returns the (joined) COM error. Gating the sound on that error therefore
+	// drops the audio cue spuriously. See docs/troubleshooting.md, which already
+	// documents the "doc.LoadXml(tmpl)" error as a harmless false positive.
 	n.playSoundDetached(sound)
-	return nil
+
+	return err
 }
 
 // playSoundDetached spawns a detached child process to play the sound.
